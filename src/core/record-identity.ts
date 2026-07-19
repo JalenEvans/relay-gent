@@ -35,8 +35,7 @@ function normalizeBody(body: string): string {
   const normalized = body
     .normalize("NFC") // Unicode normalization
     .replace(/\r\n/g, "\n") // CRLF → LF
-    .trim() // Strip leading/trailing whitespace
-    .replace(/\n$/, ""); // Remove single trailing newline
+    .trim(); // Strip leading/trailing whitespace
 
   return SHA256.hash(normalized, "hex");
 }

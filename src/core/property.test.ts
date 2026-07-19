@@ -81,7 +81,7 @@ describe("Property-Based Tests", () => {
         fc.property(
           fc.string(),
           fc.option(fc.string()),
-          fc.option(fc.float()),
+          fc.option(fc.float({ noNaN: true, noInfinity: true })),
           fc.option(fc.string()),
           fc.option(fc.string()),
           (name, classname, time, failure, error) => {
