@@ -1,6 +1,12 @@
 import { describe, expect, it } from "bun:test";
 import * as fc from "fast-check";
-import { RecordSchema } from "../../../../src/domain/record/record.schema";
+import type { z } from "zod";
+import {
+  RecordSchema,
+  RevdiffRecordSchema,
+  JsonLinesRecordSchema,
+  JunitRecordSchema,
+} from "../../../../src/domain/record/record.schema";
 
 // ============================================================
 // RecordSchema — Zod discriminated union on `type` field
@@ -45,7 +51,7 @@ describe("RecordSchema", () => {
         endLine: 20,
         annotationType: "-",
         comment: "Removed dead code",
-      });
+      }) as z.infer<typeof RevdiffRecordSchema>;
       expect(result.endLine).toBe(20);
     });
 
@@ -56,7 +62,7 @@ describe("RecordSchema", () => {
         line: 0,
         annotationType: "file-level",
         comment: "File-level annotation",
-      });
+      }) as z.infer<typeof RevdiffRecordSchema>;
       expect(result.annotationType).toBe("file-level");
     });
 
@@ -129,7 +135,7 @@ describe("RecordSchema", () => {
         timestamp: "2024-01-15T10:30:00Z",
         level: "INFO",
         message: "User logged in",
-      });
+      }) as z.infer<typeof JsonLinesRecordSchema>;
       expect(result.timestamp).toBe("2024-01-15T10:30:00Z");
       expect(result.level).toBe("INFO");
     });
@@ -230,7 +236,7 @@ describe("RecordSchema", () => {
         time: 1.234,
         failure: "AssertionError",
         error: "something broke",
-      });
+      }) as z.infer<typeof JunitRecordSchema>;
       expect(result.classname).toBe("com.example.TestSuite");
       expect(result.time).toBe(1.234);
       expect(result.failure).toBe("AssertionError");
@@ -407,7 +413,7 @@ describe("RecordSchema", () => {
               typeVal !== "junit",
           );
           try {
-            RecordSchema.parse({ type: typeVal, ...rest });
+            RecordSchema.parse({ type: typeVal, ...(rest as Record<string, unknown>) });
           } catch (e) {
             expect(e).toBeDefined();
           }

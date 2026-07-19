@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import type { ZodIssue } from "zod";
 import { SchemaValidationError } from "../../../../src/domain/errors/schema-validation-error";
 
 describe("SchemaValidationError", () => {
@@ -18,10 +19,10 @@ describe("SchemaValidationError", () => {
   });
 
   it("has correct issues array", () => {
-    const issues = [
+    const issues: ZodIssue[] = [
       {
         code: "invalid_type" as const,
-        expected: "string",
+        expected: "string" as const,
         received: "number",
         path: ["name"],
         message: "Expected string, received number",
