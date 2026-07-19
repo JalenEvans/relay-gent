@@ -6,7 +6,7 @@ on:
 
 jobs:
   ci:
-    name: Lint, Format & Test
+    name: Lint, Format, Test & Build
     runs-on: ubuntu-latest
 
     steps:
@@ -24,3 +24,6 @@ jobs:
 
       - name: Run tests
         run: bun test
+
+      - name: Build
+        run: bun run build
