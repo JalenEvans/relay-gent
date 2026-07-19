@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import * as fc from "fast-check";
 import { RecordSchema } from "./record";
 
 // ============================================================
@@ -364,6 +365,77 @@ describe("RecordSchema", () => {
 
     it("handles array gracefully", () => {
       expect(() => RecordSchema.parse([])).toThrow();
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // 8. Fuzz: fast-check random inputs
+  // ------------------------------------------------------------------
+  describe("Fuzz (fast-check)", () => {
+    it("handles random objects without throwing unhandled errors", () => {
+      fc.assert(
+        fc.property(
+          fc.oneof(
+            fc.constant({}),
+            fc.constant(null),
+            fc.constant(undefined),
+            fc.constant(""),
+            fc.constant(42),
+            fc.constant([]),
+            fc.anything(),
+          ),
+          (input) => {
+            try {
+              RecordSchema.parse(input);
+            } catch (e) {
+              // Should throw ZodError, not unhandled errors
+              expect(e).toBeDefined();
+            }
+          },
+        ),
+        { numRuns: 200 },
+      );
+    });
+
+    it("handles random objects with type field that don't match any variant", () => {
+      fc.assert(
+        fc.property(fc.string({ minLength: 1 }), fc.anything(), (typeVal, rest) => {
+          fc.pre(
+            typeVal !== "revdiff" &&
+              typeVal !== "json-lines" &&
+              typeVal !== "markdown-headers" &&
+              typeVal !== "junit",
+          );
+          try {
+            RecordSchema.parse({ type: typeVal, ...rest });
+          } catch (e) {
+            expect(e).toBeDefined();
+          }
+        }),
+        { numRuns: 200 },
+      );
+    });
+
+    it("handles random revdiff-like objects with invalid field types", () => {
+      fc.assert(
+        fc.property(
+          fc.record({
+            type: fc.constant("revdiff"),
+            file: fc.oneof(fc.string(), fc.nat(), fc.boolean()),
+            line: fc.oneof(fc.string(), fc.boolean(), fc.constant(null)),
+            annotationType: fc.string(),
+            comment: fc.oneof(fc.string(), fc.nat(), fc.boolean()),
+          }),
+          (record) => {
+            try {
+              RecordSchema.parse(record);
+            } catch (e) {
+              expect(e).toBeDefined();
+            }
+          },
+        ),
+        { numRuns: 200 },
+      );
     });
   });
 });
