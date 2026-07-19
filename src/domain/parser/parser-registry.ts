@@ -4,7 +4,7 @@ import type { Parser } from "./parser.interface";
 // Parser Registry — manages named parsers with register/get/list
 // ============================================================
 // Ships with a "json-lines" stub parser pre-registered.
-// Real implementation of json-lines parsing comes in Chunk 2.
+// The real implementation is registered via src/parsers/index.ts.
 // ============================================================
 
 const jsonLinesStub: Parser = {

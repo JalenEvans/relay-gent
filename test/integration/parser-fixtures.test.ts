@@ -1,9 +1,13 @@
 import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createJsonLinesParser } from "../../src/parsers/json-lines";
+import type { z } from "zod";
+import type { JsonLinesRecordSchema } from "../../src/domain/record/record.schema";
 import { registry } from "../../src/parsers/index";
+import { createJsonLinesParser } from "../../src/parsers/json-lines";
+
+type JsonLinesRecord = z.infer<typeof JsonLinesRecordSchema>;
 
 // ============================================================
 // integration: json-lines parser with NDJSON fixtures + registry
@@ -32,13 +36,13 @@ describe("parser integration with ndjson fixtures", () => {
   describe("valid.ndjson", () => {
     it("produces 3 records", () => {
       const parser = createJsonLinesParser();
-      const records = parser.parse(loadFixture("valid.ndjson"));
+      const records = parser.parse(loadFixture("valid.ndjson")) as JsonLinesRecord[];
       expect(records).toHaveLength(3);
     });
 
     it("records have correct message values", () => {
       const parser = createJsonLinesParser();
-      const records = parser.parse(loadFixture("valid.ndjson"));
+      const records = parser.parse(loadFixture("valid.ndjson")) as JsonLinesRecord[];
       expect(records[0].message).toBe("Server started");
       expect(records[1].message).toBe("Request received");
       expect(records[2].message).toBe("Disk space low");
@@ -46,7 +50,7 @@ describe("parser integration with ndjson fixtures", () => {
 
     it("records have type 'json-lines'", () => {
       const parser = createJsonLinesParser();
-      const records = parser.parse(loadFixture("valid.ndjson"));
+      const records = parser.parse(loadFixture("valid.ndjson")) as JsonLinesRecord[];
       for (const record of records) {
         expect(record.type).toBe("json-lines");
       }
@@ -54,7 +58,7 @@ describe("parser integration with ndjson fixtures", () => {
 
     it("records have schemaVersion 1", () => {
       const parser = createJsonLinesParser();
-      const records = parser.parse(loadFixture("valid.ndjson"));
+      const records = parser.parse(loadFixture("valid.ndjson")) as JsonLinesRecord[];
       for (const record of records) {
         expect(record.schemaVersion).toBe(1);
       }
@@ -62,7 +66,7 @@ describe("parser integration with ndjson fixtures", () => {
 
     it("records preserve timestamp and level fields", () => {
       const parser = createJsonLinesParser();
-      const records = parser.parse(loadFixture("valid.ndjson"));
+      const records = parser.parse(loadFixture("valid.ndjson")) as JsonLinesRecord[];
       expect(records[0].timestamp).toBe("2024-01-15T10:00:00Z");
       expect(records[0].level).toBe("info");
       expect(records[1].level).toBe("debug");
@@ -76,7 +80,7 @@ describe("parser integration with ndjson fixtures", () => {
   describe("empty.ndjson", () => {
     it("produces an empty array", () => {
       const parser = createJsonLinesParser();
-      const records = parser.parse(loadFixture("empty.ndjson"));
+      const records = parser.parse(loadFixture("empty.ndjson")) as JsonLinesRecord[];
       expect(records).toEqual([]);
     });
   });
@@ -87,20 +91,20 @@ describe("parser integration with ndjson fixtures", () => {
   describe("malformed.ndjson", () => {
     it("returns only valid records (2 records)", () => {
       const parser = createJsonLinesParser();
-      const records = parser.parse(loadFixture("malformed.ndjson"));
+      const records = parser.parse(loadFixture("malformed.ndjson")) as JsonLinesRecord[];
       expect(records).toHaveLength(2);
     });
 
     it("valid records have correct messages", () => {
       const parser = createJsonLinesParser();
-      const records = parser.parse(loadFixture("malformed.ndjson"));
+      const records = parser.parse(loadFixture("malformed.ndjson")) as JsonLinesRecord[];
       expect(records[0].message).toBe("good line");
       expect(records[1].message).toBe("another good line");
     });
 
     it("valid records still have type and schemaVersion", () => {
       const parser = createJsonLinesParser();
-      const records = parser.parse(loadFixture("malformed.ndjson"));
+      const records = parser.parse(loadFixture("malformed.ndjson")) as JsonLinesRecord[];
       expect(records[0].type).toBe("json-lines");
       expect(records[0].schemaVersion).toBe(1);
     });
@@ -112,19 +116,16 @@ describe("parser integration with ndjson fixtures", () => {
   describe("with-extra-fields.ndjson", () => {
     it("preserves extra fields on the enriched record", () => {
       const parser = createJsonLinesParser();
-      const records = parser.parse(loadFixture("with-extra-fields.ndjson"));
+      const records = parser.parse(loadFixture("with-extra-fields.ndjson")) as JsonLinesRecord[];
       expect(records).toHaveLength(2);
-      // @ts-expect-error — dynamic passthrough property
       expect(records[0].source).toBe("api");
-      // @ts-expect-error — dynamic passthrough property
       expect(records[0].requestId).toBe("abc-123");
-      // @ts-expect-error — dynamic passthrough property
       expect(records[0].tags).toEqual(["auth", "login"]);
     });
 
     it("parses the minimal record correctly", () => {
       const parser = createJsonLinesParser();
-      const records = parser.parse(loadFixture("with-extra-fields.ndjson"));
+      const records = parser.parse(loadFixture("with-extra-fields.ndjson")) as JsonLinesRecord[];
       expect(records[1].message).toBe("minimal record");
       expect(records[1].timestamp).toBeUndefined();
       expect(records[1].level).toBeUndefined();

@@ -22,11 +22,7 @@ function stubParser(name: string): Parser {
   };
 }
 
-// --- import (file does not exist yet — Red phase) ------------
-
-import {
-  createParserRegistry,
-} from "../../../../src/domain/parser/parser-registry";
+import { createParserRegistry } from "../../../../src/domain/parser/parser-registry";
 
 describe("ParserRegistry", () => {
   // ------------------------------------------------------------------

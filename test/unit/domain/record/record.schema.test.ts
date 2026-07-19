@@ -2,10 +2,10 @@ import { describe, expect, it } from "bun:test";
 import * as fc from "fast-check";
 import type { z } from "zod";
 import {
+  type JsonLinesRecordSchema,
+  type JunitRecordSchema,
   RecordSchema,
-  RevdiffRecordSchema,
-  JsonLinesRecordSchema,
-  JunitRecordSchema,
+  type RevdiffRecordSchema,
 } from "../../../../src/domain/record/record.schema";
 
 // ============================================================

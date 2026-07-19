@@ -1,4 +1,6 @@
 import { describe, expect, it } from "bun:test";
+import type { z } from "zod";
+import type { JsonLinesRecordSchema } from "../../../src/domain/record/record.schema";
 
 // ============================================================
 // json-lines Parser — parses newline-delimited JSON into Records
@@ -10,7 +12,7 @@ import { describe, expect, it } from "bun:test";
 // Malformed lines are silently skipped.
 // ============================================================
 
-// --- import (file does not exist yet — Red phase) ------------
+type JsonLinesRecord = z.infer<typeof JsonLinesRecordSchema>;
 
 import { createJsonLinesParser } from "../../../src/parsers/json-lines";
 
@@ -50,14 +52,14 @@ describe("json-lines parser", () => {
   describe("valid content", () => {
     it("returns an array of records from valid multi-line content", () => {
       const parser = createJsonLinesParser();
-      const records = parser.parse(validContent);
+      const records = parser.parse(validContent) as JsonLinesRecord[];
       expect(Array.isArray(records)).toBe(true);
       expect(records).toHaveLength(3);
     });
 
     it("each record has type json-lines", () => {
       const parser = createJsonLinesParser();
-      const records = parser.parse(validContent);
+      const records = parser.parse(validContent) as JsonLinesRecord[];
       for (const record of records) {
         expect(record.type).toBe("json-lines");
       }
@@ -65,7 +67,7 @@ describe("json-lines parser", () => {
 
     it("each record has schemaVersion 1", () => {
       const parser = createJsonLinesParser();
-      const records = parser.parse(validContent);
+      const records = parser.parse(validContent) as JsonLinesRecord[];
       for (const record of records) {
         expect(record.schemaVersion).toBe(1);
       }
@@ -78,7 +80,7 @@ describe("json-lines parser", () => {
   describe("field extraction", () => {
     it("parses the message field from each line", () => {
       const parser = createJsonLinesParser();
-      const records = parser.parse(validContent);
+      const records = parser.parse(validContent) as JsonLinesRecord[];
       expect(records[0].message).toBe("hello");
       expect(records[1].message).toBe("world");
       expect(records[2].message).toBe("third");
@@ -86,19 +88,19 @@ describe("json-lines parser", () => {
 
     it("includes timestamp when present on the line", () => {
       const parser = createJsonLinesParser();
-      const records = parser.parse(validContent);
+      const records = parser.parse(validContent) as JsonLinesRecord[];
       expect(records[0].timestamp).toBe("2024-01-01");
     });
 
     it("includes level when present on the line", () => {
       const parser = createJsonLinesParser();
-      const records = parser.parse(validContent);
+      const records = parser.parse(validContent) as JsonLinesRecord[];
       expect(records[0].level).toBe("info");
     });
 
     it("omits timestamp and level when not on the line", () => {
       const parser = createJsonLinesParser();
-      const records = parser.parse(validContent);
+      const records = parser.parse(validContent) as JsonLinesRecord[];
       // Second record: {"message":"world"} — no timestamp or level
       expect(records[1].timestamp).toBeUndefined();
       expect(records[1].level).toBeUndefined();
@@ -106,7 +108,7 @@ describe("json-lines parser", () => {
 
     it("parses a line with only the message field correctly", () => {
       const parser = createJsonLinesParser();
-      const records = parser.parse('{"message":"minimal"}\n');
+      const records = parser.parse('{"message":"minimal"}\n') as JsonLinesRecord[];
       expect(records).toHaveLength(1);
       expect(records[0].message).toBe("minimal");
       expect(records[0].timestamp).toBeUndefined();
@@ -120,22 +122,18 @@ describe("json-lines parser", () => {
   describe("passthrough", () => {
     it("preserves extra JSON fields that are not in the schema", () => {
       const parser = createJsonLinesParser();
-      const records = parser.parse(extraFieldsContent);
+      const records = parser.parse(extraFieldsContent) as JsonLinesRecord[];
       expect(records).toHaveLength(1);
       expect(records[0].message).toBe("test");
-      // @ts-expect-error — accessing a dynamic passthrough property
       expect(records[0].custom1).toBe("a");
-      // @ts-expect-error — accessing a dynamic passthrough property
       expect(records[0].custom2).toBe(123);
-      // @ts-expect-error — accessing a dynamic passthrough property
       expect(records[0].nested).toEqual({ key: "val" });
     });
 
     it("preserves extra fields on multi-line content", () => {
       const parser = createJsonLinesParser();
-      const records = parser.parse(validContent);
+      const records = parser.parse(validContent) as JsonLinesRecord[];
       // Third line: {"message":"third","extra":"field"}
-      // @ts-expect-error — accessing a dynamic passthrough property
       expect(records[2].extra).toBe("field");
     });
   });
@@ -146,19 +144,19 @@ describe("json-lines parser", () => {
   describe("edge cases", () => {
     it("returns an empty array for empty content", () => {
       const parser = createJsonLinesParser();
-      const records = parser.parse(emptyContent);
+      const records = parser.parse(emptyContent) as JsonLinesRecord[];
       expect(records).toEqual([]);
     });
 
     it("skips empty lines silently", () => {
       const parser = createJsonLinesParser();
-      const records = parser.parse(emptyLinesContent);
+      const records = parser.parse(emptyLinesContent) as JsonLinesRecord[];
       expect(records).toEqual([]);
     });
 
     it("skips lines with only whitespace", () => {
       const parser = createJsonLinesParser();
-      const records = parser.parse("   \n  \n\t\n");
+      const records = parser.parse("   \n  \n\t\n") as JsonLinesRecord[];
       expect(records).toEqual([]);
     });
   });
@@ -169,7 +167,7 @@ describe("json-lines parser", () => {
   describe("malformed lines", () => {
     it("skips malformed JSON lines and still parses valid lines", () => {
       const parser = createJsonLinesParser();
-      const records = parser.parse(malformedContent);
+      const records = parser.parse(malformedContent) as JsonLinesRecord[];
       // Only lines 2 and 4 are valid: {"message":"valid"} and {"message":"also valid"}
       expect(records).toHaveLength(2);
       expect(records[0].message).toBe("valid");
@@ -183,7 +181,7 @@ describe("json-lines parser", () => {
 
     it("handles a file where every line is malformed", () => {
       const parser = createJsonLinesParser();
-      const records = parser.parse("not json\nalso not json\n{bad}\n");
+      const records = parser.parse("not json\nalso not json\n{bad}\n") as JsonLinesRecord[];
       expect(records).toEqual([]);
     });
   });
@@ -195,7 +193,7 @@ describe("json-lines parser", () => {
     it("multiple valid lines produce exactly one record per line", () => {
       const parser = createJsonLinesParser();
       const content = '{"message":"a"}\n{"message":"b"}\n{"message":"c"}\n';
-      const records = parser.parse(content);
+      const records = parser.parse(content) as JsonLinesRecord[];
       expect(records).toHaveLength(3);
       expect(records[0].message).toBe("a");
       expect(records[1].message).toBe("b");
@@ -204,7 +202,7 @@ describe("json-lines parser", () => {
 
     it("handles content without a trailing newline", () => {
       const parser = createJsonLinesParser();
-      const records = parser.parse('{"message":"no trailing newline"}');
+      const records = parser.parse('{"message":"no trailing newline"}') as JsonLinesRecord[];
       expect(records).toHaveLength(1);
       expect(records[0].message).toBe("no trailing newline");
     });
