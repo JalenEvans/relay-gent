@@ -1,0 +1,25 @@
+{
+  "name": "relay-gent",
+  "version": "0.1.0",
+  "description": "A CLI tool designed to watch a file its changes and relay the delta of those changes to a coding agent.",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "bun test",
+    "check": "biome check src/",
+    "check:fix": "biome check --write src/",
+    "format": "biome format --write src/"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.0",
+    "bun-types": "latest",
+    "fast-check": "^3.0.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "zod": "^3.23.0"
+  },
+  "trustedDependencies": [
+    "@biomejs/biome"
+  ]
+}
