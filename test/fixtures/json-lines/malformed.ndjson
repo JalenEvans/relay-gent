@@ -1,0 +1,4 @@
+not valid json
+{"message":"good line","level":"info"}
+{broken json here
+{"message":"another good line","level":"warn"}

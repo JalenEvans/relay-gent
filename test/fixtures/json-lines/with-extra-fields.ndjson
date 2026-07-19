@@ -1,0 +1,2 @@
+{"message":"enriched record","source":"api","requestId":"abc-123","tags":["auth","login"]}
+{"message":"minimal record"}
