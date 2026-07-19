@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { ConfigSchema } from "./schema";
+import { ConfigSchema } from "../../../../src/domain/config/config.schema";
 
 // ============================================================
 // ConfigSchema — Top-level config with discriminated union targets

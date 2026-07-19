@@ -1,4 +1,4 @@
-import type { Record } from "./record";
+import type { Record } from "../record/record.schema";
 
 // ============================================================
 // Parser Interface — the contract every parser must implement.

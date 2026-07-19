@@ -1,5 +1,5 @@
 import { SHA256 } from "bun";
-import type { Record } from "./record";
+import type { Record } from "./record.schema";
 
 // ============================================================
 // Record Identity — stable identity string: `<type>:<key>:<hash>`

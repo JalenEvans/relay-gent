@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import * as fc from "fast-check";
-import { RecordSchema } from "./record";
+import { RecordSchema } from "../../../../src/domain/record/record.schema";
 
 // ============================================================
 // RecordSchema — Zod discriminated union on `type` field

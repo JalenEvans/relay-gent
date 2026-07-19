@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import * as fc from "fast-check";
-import { RecordSchema } from "./record";
-import { computeIdentity, normalizeBody } from "./record-identity";
+import { RecordSchema } from "../../../../src/domain/record/record.schema";
+import { computeIdentity, normalizeBody } from "../../../../src/domain/record/record-identity";
 
 // ============================================================
 // Property-Based Tests — fast-check

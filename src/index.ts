@@ -1,2 +1,6 @@
 // relay-gent — schemas foundation
-// This file will export public APIs as they're implemented
+export * from "./domain/record";
+export * from "./domain/config";
+export * from "./domain/parser";
+export * from "./domain/adapter";
+export * from "./domain/errors";

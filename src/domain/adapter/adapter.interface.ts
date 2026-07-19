@@ -1,5 +1,5 @@
-import type { TargetConfig } from "../config/schema";
-import type { Record } from "../core/record";
+import type { TargetConfig } from "../config/config.schema";
+import type { Record } from "../record/record.schema";
 
 // ============================================================
 // Delivered ID — returned after successful delivery to confirm

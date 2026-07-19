@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { RecordSchema } from "./record";
-import { computeIdentity, getRecordBody, getRecordKey, normalizeBody } from "./record-identity";
+import { RecordSchema } from "../../../../src/domain/record/record.schema";
+import { computeIdentity, getRecordBody, getRecordKey, normalizeBody } from "../../../../src/domain/record/record-identity";
 
 // ============================================================
 // Record Identity — stable identity string: `<type>:<key>:<hash>`
