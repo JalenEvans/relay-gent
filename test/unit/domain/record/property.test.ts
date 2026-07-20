@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import * as fc from "fast-check";
-import { computeIdentity, normalizeBody } from "../../../../src/domain/record/record-identity";
+import { computeIdentity, computeRecordHash, normalizeBody } from "../../../../src/domain/record/record-identity";
 import { RecordSchema } from "../../../../src/domain/record/record.schema";
 
 // ============================================================
@@ -102,76 +102,7 @@ describe("Property-Based Tests", () => {
   });
 
   // ------------------------------------------------------------------
-  // 2. Different bodies → different identities
-  // ------------------------------------------------------------------
-  describe("different bodies produce different identities", () => {
-    it("revdiff: different comments → different identities", () => {
-      fc.assert(
-        fc.property(fc.string({ minLength: 1 }), fc.string({ minLength: 1 }), (body1, body2) => {
-          fc.pre(body1 !== body2);
-          const record1 = RecordSchema.parse({
-            type: "revdiff",
-            file: "test.ts",
-            line: 1,
-            annotationType: "+",
-            comment: body1,
-          });
-          const record2 = RecordSchema.parse({
-            type: "revdiff",
-            file: "test.ts",
-            line: 1,
-            annotationType: "+",
-            comment: body2,
-          });
-          expect(computeIdentity(record1)).not.toBe(computeIdentity(record2));
-        }),
-        { numRuns: 100 },
-      );
-    });
-
-    it("json-lines: different messages → different identities", () => {
-      fc.assert(
-        fc.property(fc.string({ minLength: 1 }), fc.string({ minLength: 1 }), (msg1, msg2) => {
-          fc.pre(msg1 !== msg2);
-          const record1 = RecordSchema.parse({
-            type: "json-lines",
-            message: msg1,
-          });
-          const record2 = RecordSchema.parse({
-            type: "json-lines",
-            message: msg2,
-          });
-          expect(computeIdentity(record1)).not.toBe(computeIdentity(record2));
-        }),
-        { numRuns: 100 },
-      );
-    });
-
-    it("markdown-headers: different bodies → different identities", () => {
-      fc.assert(
-        fc.property(fc.string({ minLength: 1 }), fc.string({ minLength: 1 }), (body1, body2) => {
-          fc.pre(body1 !== body2);
-          const record1 = RecordSchema.parse({
-            type: "markdown-headers",
-            header: "Test",
-            level: 1,
-            body: body1,
-          });
-          const record2 = RecordSchema.parse({
-            type: "markdown-headers",
-            header: "Test",
-            level: 1,
-            body: body2,
-          });
-          expect(computeIdentity(record1)).not.toBe(computeIdentity(record2));
-        }),
-        { numRuns: 100 },
-      );
-    });
-  });
-
-  // ------------------------------------------------------------------
-  // 3. Identity format invariant
+  // 2. Identity format invariant
   // ------------------------------------------------------------------
   describe("identity format", () => {
     it("always starts with the record type prefix", () => {
@@ -214,29 +145,10 @@ describe("Property-Based Tests", () => {
       }
     });
 
-    it("always ends with a 64-char hex hash", () => {
-      fc.assert(
-        fc.property(
-          fc.record({
-            type: fc.constant("revdiff"),
-            file: fc.string(),
-            line: fc.nat(),
-            annotationType: fc.constantFrom("+", "-", " ", "file-level"),
-            comment: fc.string(),
-          }),
-          (record) => {
-            const identity = computeIdentity(RecordSchema.parse(record));
-            const hash = identity.split(":").at(-1);
-            expect(hash).toMatch(/^[0-9a-f]{64}$/);
-          },
-        ),
-        { numRuns: 100 },
-      );
-    });
   });
 
   // ------------------------------------------------------------------
-  // 4. normalizeBody invariants
+  // 3. normalizeBody invariants
   // ------------------------------------------------------------------
   describe("normalizeBody invariants", () => {
     it("always returns a 64-char hex string", () => {
@@ -265,6 +177,94 @@ describe("Property-Based Tests", () => {
           expect(normalizeBody(trimmed)).toBe(normalizeBody(input));
         }),
         { numRuns: 200 },
+      );
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // 4. computeRecordHash — property tests
+  // ------------------------------------------------------------------
+  describe("computeRecordHash — property tests", () => {
+    it("revdiff: different comments → different hashes", () => {
+      fc.assert(
+        fc.property(fc.string({ minLength: 1 }), fc.string({ minLength: 1 }), (body1, body2) => {
+          fc.pre(body1 !== body2);
+          const record1 = RecordSchema.parse({
+            type: "revdiff",
+            file: "test.ts",
+            line: 1,
+            annotationType: "+",
+            comment: body1,
+          });
+          const record2 = RecordSchema.parse({
+            type: "revdiff",
+            file: "test.ts",
+            line: 1,
+            annotationType: "+",
+            comment: body2,
+          });
+          expect(computeRecordHash(record1)).not.toBe(computeRecordHash(record2));
+        }),
+        { numRuns: 100 },
+      );
+    });
+
+    it("json-lines: different messages → different hashes", () => {
+      fc.assert(
+        fc.property(fc.string({ minLength: 1 }), fc.string({ minLength: 1 }), (msg1, msg2) => {
+          fc.pre(msg1 !== msg2);
+          const record1 = RecordSchema.parse({
+            type: "json-lines",
+            message: msg1,
+          });
+          const record2 = RecordSchema.parse({
+            type: "json-lines",
+            message: msg2,
+          });
+          expect(computeRecordHash(record1)).not.toBe(computeRecordHash(record2));
+        }),
+        { numRuns: 100 },
+      );
+    });
+
+    it("markdown-headers: different bodies → different hashes", () => {
+      fc.assert(
+        fc.property(fc.string({ minLength: 1 }), fc.string({ minLength: 1 }), (body1, body2) => {
+          fc.pre(body1 !== body2);
+          const record1 = RecordSchema.parse({
+            type: "markdown-headers",
+            header: "Test",
+            level: 1,
+            body: body1,
+          });
+          const record2 = RecordSchema.parse({
+            type: "markdown-headers",
+            header: "Test",
+            level: 1,
+            body: body2,
+          });
+          expect(computeRecordHash(record1)).not.toBe(computeRecordHash(record2));
+        }),
+        { numRuns: 100 },
+      );
+    });
+
+    it("always produces a 64-char hex hash", () => {
+      fc.assert(
+        fc.property(
+          fc.record({
+            type: fc.constant("revdiff"),
+            file: fc.string(),
+            line: fc.nat(),
+            annotationType: fc.constantFrom("+", "-", " ", "file-level"),
+            comment: fc.string(),
+          }),
+          (record) => {
+            const hash = computeRecordHash(RecordSchema.parse(record));
+            expect(hash).toMatch(/^[0-9a-f]{64}$/);
+          },
+        ),
+        { numRuns: 100 },
       );
     });
   });

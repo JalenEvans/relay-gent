@@ -2,7 +2,7 @@ import { SHA256 } from "bun";
 import type { Record } from "./record.schema";
 
 // ============================================================
-// Record Identity — stable identity string: `<type>:<key>:<hash>`
+// Record Identity — stable identity string: `<type>:<key>`
 // ============================================================
 
 function getRecordKey(record: Record): string {
@@ -42,9 +42,12 @@ function normalizeBody(body: string): string {
 
 function computeIdentity(record: Record): string {
   const key = getRecordKey(record);
-  const body = getRecordBody(record);
-  const hash = normalizeBody(body);
-  return `${record.type}:${key}:${hash}`;
+  return `${record.type}:${key}`;
 }
 
-export { getRecordKey, getRecordBody, normalizeBody, computeIdentity };
+function computeRecordHash(record: Record): string {
+  const body = getRecordBody(record);
+  return normalizeBody(body);
+}
+
+export { getRecordKey, getRecordBody, normalizeBody, computeIdentity, computeRecordHash };
