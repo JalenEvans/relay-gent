@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { RawCommandAdapter } from "../../../src/adapters/raw-command";
+import { RecordSchema } from "../../../src/domain/record/record.schema";
+import { computeIdentity } from "../../../src/domain/record/record-identity";
 import { formatRecords } from "../../../src/domain/adapter/formatter";
 import type { TargetConfig } from "../../../src/domain/config/config.schema";
-import { computeIdentity } from "../../../src/domain/record/record-identity";
-import { RecordSchema } from "../../../src/domain/record/record.schema";
+import { existsSync, unlinkSync, readFileSync } from "node:fs";
 
 // ============================================================
 // RawCommandAdapter — delivers Records to a shell command via stdin
@@ -54,7 +54,7 @@ function makeJsonRecord(
 }
 
 function makeCtx(
-  overrides: Partial<TargetConfig> = {
+  overrides: Partial<TargetConfig> & { adapter: "raw-command" } = {
     adapter: "raw-command",
     watchPath: ".",
     parser: "json-lines",
@@ -453,7 +453,7 @@ describe("RawCommandAdapter", () => {
       const adapter = new RawCommandAdapter();
       const ctx = makeCtx({ command: "cat" });
 
-      const isReady = await adapter.ready?.(ctx);
+      const isReady = await adapter.ready!(ctx);
 
       expect(isReady).toBe(true);
     });
@@ -464,7 +464,7 @@ describe("RawCommandAdapter", () => {
         command: "definitely-not-a-real-command-xyz123",
       });
 
-      const isReady = await adapter.ready?.(ctx);
+      const isReady = await adapter.ready!(ctx);
 
       expect(isReady).toBe(false);
     });
