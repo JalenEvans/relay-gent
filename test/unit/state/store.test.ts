@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdtemp, rm, readFile, readdir } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { StateStore } from "../../../src/state/store";
@@ -482,5 +482,183 @@ describe("StateStore — total_delivered counter", () => {
 
     store.clear();
     expect(store.totalDelivered).toBe(0);
+  });
+});
+
+// ------------------------------------------------------------------
+// 9. Corrupted state file — invalid JSON / wrong schema recovery
+// ------------------------------------------------------------------
+
+describe("StateStore — corrupted state file", () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await createTmpDir();
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("recovers gracefully from invalid JSON in state.json", async () => {
+    const path = statePath(tmpDir, "corrupt-invalid-json");
+    const dir = join(tmpDir, "targets", "corrupt-invalid-json");
+    // Create a state.json with invalid JSON content
+    await mkdir(dir, { recursive: true });
+    await writeFile(path, "{ invalid json content here }", "utf-8");
+
+    const store = new StateStore("corrupt-invalid-json", tmpDir);
+    // Should not throw — must recover to fresh empty state
+    await expect(store.load()).resolves.toBeUndefined();
+
+    expect(store.getAllRecords()).toEqual({});
+    expect(store.totalDelivered).toBe(0);
+    expect(store.lastRun).toBeNull();
+  });
+
+  it("recovers when state.json has valid JSON but missing required fields", async () => {
+    const path = statePath(tmpDir, "corrupt-missing-fields");
+    const dir = join(tmpDir, "targets", "corrupt-missing-fields");
+    // State with valid JSON structure but wrong/missing top-level fields
+    await mkdir(dir, { recursive: true });
+    await writeFile(path, JSON.stringify({ foo: "bar", baz: 42 }), "utf-8");
+
+    const store = new StateStore("corrupt-missing-fields", tmpDir);
+    await expect(store.load()).resolves.toBeUndefined();
+
+    // Should have recovered with defaults
+    expect(store.getAllRecords()).toEqual({});
+    expect(store.totalDelivered).toBe(0);
+    expect(store.lastRun).toBeNull();
+  });
+
+  it("recovers when state.json has null instead of records object", async () => {
+    const path = statePath(tmpDir, "corrupt-null-records");
+    const dir = join(tmpDir, "targets", "corrupt-null-records");
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      path,
+      JSON.stringify({ records: null, last_run: null, total_delivered: 0 }),
+      "utf-8",
+    );
+
+    const store = new StateStore("corrupt-null-records", tmpDir);
+    await expect(store.load()).resolves.toBeUndefined();
+
+    expect(store.getAllRecords()).toEqual({});
+    expect(store.totalDelivered).toBe(0);
+  });
+
+  it("recovers when state.json has records as array instead of object", async () => {
+    const path = statePath(tmpDir, "corrupt-array-records");
+    const dir = join(tmpDir, "targets", "corrupt-array-records");
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      path,
+      JSON.stringify({ records: ["not", "an", "object"], last_run: null, total_delivered: 0 }),
+      "utf-8",
+    );
+
+    const store = new StateStore("corrupt-array-records", tmpDir);
+    await expect(store.load()).resolves.toBeUndefined();
+
+    // Should start fresh since records is not a plain object
+    expect(store.getAllRecords()).toEqual({});
+    expect(store.totalDelivered).toBe(0);
+  });
+});
+
+// ------------------------------------------------------------------
+// 10. Permission error — unreadable state.json
+// ------------------------------------------------------------------
+
+describe("StateStore — permission errors", () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await createTmpDir();
+  });
+
+  afterEach(async () => {
+    // Restore permissions broadly so rm can clean up
+    try {
+      const filePath = statePath(tmpDir, "permission-test");
+      await chmod(filePath, 0o644);
+    } catch {
+      // path may not exist
+    }
+    try {
+      const dirPath = targetsDir(tmpDir, "dir-permission-test");
+      await chmod(dirPath, 0o755);
+    } catch {
+      // path may not exist
+    }
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("throws a clear error mentioning permissions when state.json is not readable", async () => {
+    const store = new StateStore("permission-test", tmpDir);
+
+    // Save a valid state first
+    store.set("test:id", "test-hash");
+    await store.save();
+
+    // Remove read permissions
+    const path = statePath(tmpDir, "permission-test");
+    await chmod(path, 0o000);
+
+    // Loading should throw a clear error about permissions
+    try {
+      await expect(store.load()).rejects.toThrow(/permission|EACCES|denied/i);
+    } finally {
+      // Restore for cleanup even if assertion fails
+      await chmod(path, 0o644);
+    }
+  });
+
+  it("is usable again after permission error is resolved", async () => {
+    const store = new StateStore("permission-test", tmpDir);
+
+    // Save and verify data exists
+    store.set("survivor:id", "survivor-hash");
+    await store.save();
+
+    // Remove read permissions
+    const path = statePath(tmpDir, "permission-test");
+    await chmod(path, 0o000);
+
+    // First load should throw due to permissions
+    try {
+      await expect(store.load()).rejects.toThrow();
+    } finally {
+      // Restore permissions even if assertion fails
+      await chmod(path, 0o644);
+    }
+
+    // Second load should succeed and load the data
+    await expect(store.load()).resolves.toBeUndefined();
+    expect(store.get("survivor:id")).toBeDefined();
+    expect(store.get("survivor:id")!.hash).toBe("survivor-hash");
+    expect(store.totalDelivered).toBe(1);
+  });
+
+  it("handles permission error on the state directory gracefully", async () => {
+    const store = new StateStore("dir-permission-test", tmpDir);
+
+    // Save a valid state
+    store.set("dir:id", "dir-hash");
+    await store.save();
+
+    // Remove execute permission from the target directory
+    const dir = targetsDir(tmpDir, "dir-permission-test");
+    await chmod(dir, 0o000);
+
+    // Loading should throw a clear error (directory not searchable)
+    try {
+      await expect(store.load()).rejects.toThrow(/permission|EACCES|denied/i);
+    } finally {
+      // Restore for cleanup even if assertion fails
+      await chmod(dir, 0o755);
+    }
   });
 });

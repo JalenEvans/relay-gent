@@ -48,12 +48,23 @@ export class StateStore {
     try {
       const raw = await readFile(this.statePath, "utf-8");
       const data = JSON.parse(raw) as StateData;
-      this._records = data.records ?? {};
+      if (data.records && typeof data.records === "object" && !Array.isArray(data.records)) {
+        this._records = data.records;
+      } else {
+        this._records = {};
+      }
       this._lastRun = data.last_run ?? null;
       this._totalDelivered = data.total_delivered ?? 0;
-    } catch {
-      // File not found, corrupt JSON, or any other read error — start fresh
-      this.clear();
+    } catch (err) {
+      const nodeErr = err as NodeJS.ErrnoException;
+      if (nodeErr.code === "EACCES" || nodeErr.code === "EPERM") {
+        throw new Error(`Cannot read state file at ${this.statePath}: permission denied`);
+      }
+      if (nodeErr.code === "ENOENT" || err instanceof SyntaxError) {
+        this.clear();
+        return;
+      }
+      throw err;
     }
   }
 
