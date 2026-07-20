@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { RecordSchema } from "../../../../src/domain/record/record.schema";
 import { computeIdentity, normalizeBody } from "../../../../src/domain/record/record-identity";
+import { RecordSchema } from "../../../../src/domain/record/record.schema";
 
 // ============================================================
 // Performance Benchmarks
