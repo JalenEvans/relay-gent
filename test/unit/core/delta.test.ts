@@ -3,13 +3,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DeltaTracker } from "../../../src/core/delta";
-import { StateStore } from "../../../src/state/store";
+import { computeIdentity, computeRecordHash } from "../../../src/domain/record/record-identity";
 import { RecordSchema } from "../../../src/domain/record/record.schema";
-import {
-  computeIdentity,
-  computeRecordHash,
-} from "../../../src/domain/record/record-identity";
 import type { Record } from "../../../src/domain/record/record.schema";
+import { StateStore } from "../../../src/state/store";
 
 // ============================================================
 // DeltaTracker — delta classification engine
@@ -49,7 +46,10 @@ function revdiffRecord(
 
 /** Build a valid json-lines record fixture */
 function jsonLinesRecord(message: string, timestamp?: string): Record {
-  const base: Record<string, unknown> = { type: "json-lines", message };
+  const base: { type: string; message: string; timestamp?: string } = {
+    type: "json-lines",
+    message,
+  };
   if (timestamp) base.timestamp = timestamp;
   return RecordSchema.parse(base) as Record;
 }
@@ -107,7 +107,10 @@ describe("DeltaTracker", () => {
       const result = await tracker.filter([record]);
 
       expect(result.newRecords[0]).toBe(record);
-      expect(result.newRecords[0].file).toBe("src/main.ts");
+      const first = result.newRecords[0];
+      if (first.type === "revdiff") {
+        expect(first.file).toBe("src/main.ts");
+      }
     });
   });
 
@@ -336,9 +339,9 @@ describe("DeltaTracker", () => {
       // Unchanged count should be 1
       expect(result.unchangedCount).toBe(1);
       // Combined total should equal input length
-      expect(
-        result.newRecords.length + result.changedRecords.length + result.unchangedCount,
-      ).toBe(3);
+      expect(result.newRecords.length + result.changedRecords.length + result.unchangedCount).toBe(
+        3,
+      );
     });
 
     it("unchanged records are never present in newRecords or changedRecords", async () => {

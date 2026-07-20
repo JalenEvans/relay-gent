@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { chmod, mkdir, mkdtemp, rm, readFile, readdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { StateStore } from "../../../src/state/store";
@@ -98,12 +98,12 @@ describe("StateStore — persistence", () => {
 
     const record1 = store2.get("revdiff:src/main.ts:42:+");
     expect(record1).toBeDefined();
-    expect(record1!.hash).toBe("abc123def456");
-    expect(record1!.delivered_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(record1?.hash).toBe("abc123def456");
+    expect(record1?.delivered_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
 
     const record2 = store2.get("json-lines:2024-01-15T10:30:00Z:INFO");
     expect(record2).toBeDefined();
-    expect(record2!.hash).toBe("789ghi012jkl");
+    expect(record2?.hash).toBe("789ghi012jkl");
 
     expect(store2.totalDelivered).toBe(2);
   });
@@ -318,8 +318,8 @@ describe("StateStore — get/set", () => {
 
     const record = store.get("revdiff:src/main.ts:42:+");
     expect(record).toBeDefined();
-    expect(record!.hash).toBe("abc123hash");
-    expect(record!.delivered_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(record?.hash).toBe("abc123hash");
+    expect(record?.delivered_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
   it("get returns undefined for nonexistent identity", () => {
@@ -334,11 +334,11 @@ describe("StateStore — get/set", () => {
 
     store.set("identity:1", "original-hash");
     const before = store.get("identity:1");
-    expect(before!.hash).toBe("original-hash");
+    expect(before?.hash).toBe("original-hash");
 
     store.set("identity:1", "updated-hash");
     const after = store.get("identity:1");
-    expect(after!.hash).toBe("updated-hash");
+    expect(after?.hash).toBe("updated-hash");
   });
 
   it("set records the delivered_at timestamp", () => {
@@ -348,8 +348,8 @@ describe("StateStore — get/set", () => {
     store.set("ts:test", "hash-ts");
     const after = Date.now();
 
-    const record = store.get("ts:test");
-    const deliveredAt = new Date(record!.delivered_at).getTime();
+    const record = store.get("ts:test") as { delivered_at: string; hash: string };
+    const deliveredAt = new Date(record.delivered_at).getTime();
     expect(deliveredAt).toBeGreaterThanOrEqual(before);
     expect(deliveredAt).toBeLessThanOrEqual(after);
   });
@@ -398,7 +398,7 @@ describe("StateStore — last_run timestamp", () => {
     await store.save();
     const after = Date.now();
 
-    const lastRun = new Date(store.lastRun!).getTime();
+    const lastRun = new Date(store.lastRun as string).getTime();
     expect(lastRun).toBeGreaterThanOrEqual(before);
     expect(lastRun).toBeLessThanOrEqual(after);
   });
@@ -638,7 +638,7 @@ describe("StateStore — permission errors", () => {
     // Second load should succeed and load the data
     await expect(store.load()).resolves.toBeUndefined();
     expect(store.get("survivor:id")).toBeDefined();
-    expect(store.get("survivor:id")!.hash).toBe("survivor-hash");
+    expect(store.get("survivor:id")?.hash).toBe("survivor-hash");
     expect(store.totalDelivered).toBe(1);
   });
 
