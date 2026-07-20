@@ -62,7 +62,7 @@ export class DeltaTracker {
 
   /**
    * Persist delivery state for each record to StateStore.
-   * Must call store.save() after setting all records.
+   * Calls store.set() for each record, then store.save() to atomically persist.
    */
   async markDelivered(records: Record[]): Promise<void> {
     for (const record of records) {
