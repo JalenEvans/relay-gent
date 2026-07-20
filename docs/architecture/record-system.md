@@ -58,8 +58,10 @@ This is intentional: different JSON formats may carry extra metadata that downst
 Every record gets a stable identity string via `computeIdentity()`:
 
 ```
-<type>:<key>:<sha256-hash>
+<type>:<key>
 ```
+
+The identity is a pure lookup key — it does **not** contain a hash. Content change detection is handled separately by `computeRecordHash()` (see below).
 
 ### Key Extraction (`getRecordKey`)
 
@@ -72,6 +74,8 @@ Every record gets a stable identity string via `computeIdentity()`:
 
 ### Body Extraction (`getRecordBody`)
 
+Used by `computeRecordHash()` to extract the content to be hashed. The identity itself does not include body content.
+
 | Type | Body Source |
 |------|-----------|
 | `revdiff` | `comment` |
@@ -79,16 +83,20 @@ Every record gets a stable identity string via `computeIdentity()`:
 | `markdown-headers` | `body` |
 | `junit` | `failure` (fallback: `error`, fallback: `""`) |
 
+### Content Hashing (`computeRecordHash`)
+
+`computeRecordHash()` produces a 64-character SHA-256 hex hash of the normalized record body. This hash is stored alongside the identity in StateStore and compared on subsequent runs to detect content changes.
+
 ### Normalization (`normalizeBody`)
 
-Before hashing, the body goes through:
+Before hashing, the body goes through a normalization pipeline:
 
-1. **NFC normalization** - Unicode equivalence (e.g., `cafe\u0301` becomes `caf\u00e9`)
-2. **CRLF to LF** - Consistent line endings
-3. **Trim** - Strip leading/trailing whitespace
-4. **SHA-256** - 64-character hex hash
+1. **NFC normalization** — Unicode equivalence (e.g., `cafe\u0301` becomes `caf\u00e9`)
+2. **CRLF to LF** — Consistent line endings
+3. **Trim** — Strip leading/trailing whitespace
+4. **SHA-256** — 64-character hex hash
 
-This ensures records with semantically identical content produce the same identity regardless of encoding differences.
+This ensures records with semantically identical content produce the same hash regardless of encoding differences. Normalization applies only to hashing — the identity string is never normalized.
 
 ### Example
 
@@ -101,8 +109,26 @@ computeIdentity({
   comment: "Added null check",
   schemaVersion: 1,
 })
-// => "revdiff:src/main.ts:42:+:a1b2c3d4...<64-char hex>"
+// => "revdiff:src/main.ts:42:+"
+
+// Content hash is computed separately:
+computeRecordHash({
+  type: "revdiff",
+  file: "src/main.ts",
+  line: 42,
+  annotationType: "+",
+  comment: "Added null check",
+  schemaVersion: 1,
+})
+// => "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2"
 ```
+
+### Identity vs. Hash
+
+| Concern | Function | Used For |
+|---------|----------|----------|
+| Lookup key | `computeIdentity()` | StateStore map key, finding records across runs |
+| Content fingerprint | `computeRecordHash()` | Detecting whether a record's body has changed |
 
 ## Adding a New Record Type
 
