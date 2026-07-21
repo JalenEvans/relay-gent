@@ -1,12 +1,12 @@
-import { readFile, stat, readdir } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import chokidar, { type FSWatcher } from "chokidar";
+import type { DeltaTracker } from "../core/delta";
 import type { Adapter } from "../domain/adapter/adapter.interface";
 import type { TargetConfig } from "../domain/config/config.schema";
 import type { Parser } from "../domain/parser/parser.interface";
 import type { Record } from "../domain/record/record.schema";
-import { DeltaTracker } from "../core/delta";
-import { StateStore } from "../state/store";
+import type { StateStore } from "../state/store";
 
 // ============================================================
 // Runner — orchestrator that wires Parser → Adapter →
@@ -48,9 +48,7 @@ export class Runner {
 
       if (records.length === 0) return;
 
-      const { newRecords, changedRecords } = await this.delta.filter(
-        records,
-      );
+      const { newRecords, changedRecords } = await this.delta.filter(records);
 
       const toDeliver = [...newRecords, ...changedRecords];
       if (toDeliver.length === 0) return;
@@ -120,7 +118,7 @@ export class Runner {
       // This ensures that any file writes after start() returns will be
       // detected as new events rather than being swallowed by ignoreInitial.
       await new Promise<void>((resolve) => {
-        this.watcher!.on("ready", resolve);
+        this.watcher?.on("ready", resolve);
       });
 
       // Register signal handlers for graceful shutdown.
