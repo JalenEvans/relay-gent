@@ -1,10 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ZodError } from "zod";
 import type { Config } from "../../../src/domain/config/config.schema";
-import { loadConfig } from "../../../src/config/loader";
+import type { LoadConfigOptions } from "../../../src/config/loader";
 
 // ============================================================
 // Config Loader — loadConfig()
@@ -83,9 +83,17 @@ async function createTmpDir(): Promise<string> {
 
 describe("loadConfig", () => {
   let tmpDir: string;
+  let loadConfig: (options?: LoadConfigOptions) => Config;
 
   beforeEach(async () => {
     tmpDir = await createTmpDir();
+
+    // Dynamic import with cache-busting query parameter to bypass any
+    // global module mock that other test files (e.g. cli.core.test.ts)
+    // may have registered via vi.mock(). Bun hoists vi.mock globally,
+    // so static imports would resolve to the mocked version.
+    const mod = await import("../../../src/config/loader?t=" + Date.now());
+    loadConfig = mod.loadConfig;
   });
 
   afterEach(async () => {

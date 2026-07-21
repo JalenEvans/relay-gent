@@ -1,6 +1,18 @@
-import { describe, expect, it } from "bun:test";
+import { beforeAll, describe, expect, it } from "bun:test";
 import type { Command } from "commander";
-import { createCli } from "../../src/cli";
+
+// Dynamic import with cache-busting to avoid module-state leakage
+// from other test files (e.g. cli.core.test.ts) that may have
+// modified the shared module instance via spies or mocks. Bun
+// caches ES module instances, so a static import would share
+// the same config-loader instance that other files may have
+// altered. Using a unique query parameter forces a fresh module
+// evaluation with the real loadConfig implementation.
+let createCli: () => Command;
+beforeAll(async () => {
+  const mod = await import("../../src/cli?t=" + Date.now());
+  createCli = mod.createCli;
+});
 
 // ============================================================
 // CLI Foundation — Phase 1
@@ -21,11 +33,18 @@ import { createCli } from "../../src/cli";
 async function runWithArgs(args: string[]): Promise<string> {
   const cli = createCli();
   const chunks: string[] = [];
+  const errChunks: string[] = [];
 
   const origWrite = process.stdout.write.bind(process.stdout);
+  const origErrWrite = process.stderr.write.bind(process.stderr);
   // @ts-expect-error - mocking stdout.write for test capture
   process.stdout.write = (chunk: string, ..._rest: unknown[]) => {
     chunks.push(String(chunk));
+    return true;
+  };
+  // @ts-expect-error - mocking stderr.write for test capture
+  process.stderr.write = (chunk: string, ..._rest: unknown[]) => {
+    errChunks.push(String(chunk));
     return true;
   };
 
@@ -37,9 +56,10 @@ async function runWithArgs(args: string[]): Promise<string> {
     // Commander throws a CommanderError when exitOverride is set
   } finally {
     process.stdout.write = origWrite;
+    process.stderr.write = origErrWrite;
   }
 
-  return chunks.join("");
+  return chunks.join("") + errChunks.join("");
 }
 
 /** Returns all registered command names. */
@@ -181,23 +201,23 @@ describe("--help output", () => {
 });
 
 // ============================================================
-// 5. Stub commands print "Not yet implemented"
+// 5. Implemented commands produce meaningful output
 // ============================================================
 
-describe("command stubs", () => {
-  it('status prints "Not yet implemented"', async () => {
+describe("command outputs", () => {
+  it('status shows "No targets configured" by default', async () => {
     const output = await runWithArgs(["status"]);
-    expect(output).toMatch(/not yet implemented|Not yet implemented/i);
+    expect(output).toContain("No targets configured");
   });
 
-  it('watch prints "Not yet implemented"', async () => {
+  it("watch shows error for missing target", async () => {
     const output = await runWithArgs(["watch", "some-file"]);
-    expect(output).toMatch(/not yet implemented|Not yet implemented/i);
+    expect(output).toContain("Target name required");
   });
 
-  it('once prints "Not yet implemented"', async () => {
+  it("once shows error for missing target", async () => {
     const output = await runWithArgs(["once", "some-file"]);
-    expect(output).toMatch(/not yet implemented|Not yet implemented/i);
+    expect(output).toContain("Target name required");
   });
 
   it('stop prints "Not yet implemented"', async () => {

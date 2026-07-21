@@ -1,0 +1,347 @@
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createCli } from "../../src/cli";
+
+// Import real modules for vi.spyOn-based mocking, which is scoped to this
+// file unlike vi.mock which globally pollutes the module registry in Bun.
+import * as configLoader from "../../src/config/loader";
+import * as runnerModule from "../../src/application/runner";
+
+// ============================================================
+// Phase 3 — Status Dashboard & Core Commands
+// ============================================================
+// These tests validate the command-layer behaviour of the
+// `status`, `watch`, and `once` commands that Phase 3 is
+// expected to implement.
+//
+// The tests should FAIL against the current stubs because
+// they assert behaviour the stubs don't provide (target
+// display, file validation, exit codes, error messages).
+//
+// Mocks are provided for loadConfig and Runner so that
+// the command-layer logic can be tested without disk I/O
+// or file-watcher side effects.
+// ============================================================
+
+// ============================================================
+// Mock State — vi.spyOn (file-scoped, does not leak globally)
+// ============================================================
+
+// After all tests in this file complete, restore all spied-on
+// functions so other test files see the real implementations.
+afterAll(() => {
+  vi.restoreAllMocks();
+});
+
+let loadConfigSpy: ReturnType<typeof vi.spyOn>;
+
+const mockRunnerStart = vi.fn(async () => {});
+const mockRunnerStop = vi.fn(async () => {});
+const mockRunnerInstance = {
+  start: mockRunnerStart,
+  stop: mockRunnerStop,
+};
+let runnerSpy: ReturnType<typeof vi.spyOn>;
+
+// ============================================================
+// Helpers — shared test utilities
+// ============================================================
+
+const MOCK_TARGETS: Record<string, Record<string, unknown>> = {
+  web: {
+    adapter: "opencode",
+    watchPath: "./src",
+    parser: "typescript",
+    server_url: "http://localhost:4096",
+  },
+};
+
+function baseConfig(
+  targets: Record<string, Record<string, unknown>> = {},
+): Record<string, unknown> {
+  return {
+    schemaVersion: 1,
+    defaultAdapter: "opencode",
+    defaults: { debounceMs: 300, maxRetries: 3, retryBackoffMs: 1000 },
+    targets,
+  };
+}
+
+/**
+ * Run the CLI with the given argv and return captured
+ * stdout, stderr, and the exit code.
+ *
+ * Works by:
+ *   - Replacing stdout / stderr write with capture buffers
+ *   - Calling cli.exitOverride() so Commander errors throw
+ *   - Spying on process.exit so explicit calls don't terminate
+ *   - Deriving exitCode from the CommanderError if present,
+ *     otherwise from the exit spy
+ */
+async function runWithArgs(
+  args: string[],
+): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
+  const cli = createCli();
+  const stdoutChunks: string[] = [];
+  const stderrChunks: string[] = [];
+  let exitCode: number | null = null;
+
+  const origStdout = process.stdout.write.bind(process.stdout);
+  const origStderr = process.stderr.write.bind(process.stderr);
+
+  // @ts-expect-error — mocking stdout.write for test capture
+  process.stdout.write = (chunk: string, ..._rest: unknown[]) => {
+    stdoutChunks.push(String(chunk));
+    return true;
+  };
+
+  // @ts-expect-error — mocking stderr.write for test capture
+  process.stderr.write = (chunk: string, ..._rest: unknown[]) => {
+    stderrChunks.push(String(chunk));
+    return true;
+  };
+
+  // Prevent handlers from calling process.exit() directly
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(
+    (_code?: number) => {
+      // Capture exit code without terminating
+    },
+  );
+
+  cli.exitOverride();
+
+  try {
+    await cli.parseAsync(args, { from: "user" });
+  } catch (err: unknown) {
+    // Commander throws CommanderError when exitOverride triggers
+    const e = err as { code?: string; exitCode?: number };
+    if (
+      e.code === "commander.exit" ||
+      e.code === "commander.executeSubCommandAsync"
+    ) {
+      exitCode = e.exitCode ?? 1;
+    }
+  } finally {
+    process.stdout.write = origStdout;
+    process.stderr.write = origStderr;
+
+    // If process.exit was called directly (not via Commander),
+    // the spy captured the exit code
+    if (exitCode === null && exitSpy.mock.calls.length > 0) {
+      exitCode = exitSpy.mock.calls[0][0] ?? 0;
+    }
+
+    exitSpy.mockRestore();
+  }
+
+  return {
+    stdout: stdoutChunks.join(""),
+    stderr: stderrChunks.join(""),
+    exitCode,
+  };
+}
+
+// ============================================================
+// Status Command Tests
+// ============================================================
+
+describe("status command", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    loadConfigSpy = vi.spyOn(configLoader, "loadConfig");
+  });
+
+  it("is executable without arguments and exits with code 0", async () => {
+    loadConfigSpy.mockReturnValue(baseConfig());
+    const { stdout, exitCode } = await runWithArgs([]);
+
+    // Status should produce output (table, list, or message)
+    expect(stdout.length).toBeGreaterThan(0);
+
+    // Status should exit successfully
+    expect(exitCode).toBe(0);
+  });
+
+  it("includes target names in output when config has targets", async () => {
+    loadConfigSpy.mockReturnValue(baseConfig(MOCK_TARGETS));
+    const { stdout, exitCode } = await runWithArgs(["status"]);
+
+    // The status output should mention the configured target name
+    expect(stdout).toContain("web");
+
+    // Should exit successfully
+    expect(exitCode).toBe(0);
+  });
+
+  it("handles missing targets gracefully without crashing", async () => {
+    loadConfigSpy.mockReturnValue(baseConfig({}));
+    const { stdout, exitCode } = await runWithArgs(["status"]);
+
+    // Should not just print the stub message
+    expect(stdout).not.toMatch(/not yet implemented/i);
+
+    // Should still exit successfully even with empty config
+    expect(exitCode).toBe(0);
+  });
+});
+
+// ============================================================
+// Watch Command Tests
+// ============================================================
+
+describe("watch command", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    loadConfigSpy = vi.spyOn(configLoader, "loadConfig");
+    runnerSpy = vi
+      .spyOn(runnerModule, "Runner")
+      .mockImplementation(() => mockRunnerInstance as unknown as typeof runnerModule.Runner);
+  });
+
+  it("shows error and exits with code 1 when target is not found", async () => {
+    loadConfigSpy.mockReturnValue(baseConfig({}));
+    const { stderr, exitCode } = await runWithArgs([
+      "watch",
+      "test.md",
+      "--target",
+      "nonexistent",
+    ]);
+
+    // Must indicate the target was not found
+    expect(stderr).toMatch(/not found/i);
+
+    // Must fail with exit code 1
+    expect(exitCode).toBe(1);
+  });
+
+  it("shows error and exits with code 1 when file does not exist", async () => {
+    loadConfigSpy.mockReturnValue(baseConfig(MOCK_TARGETS));
+    const { stderr, exitCode } = await runWithArgs([
+      "watch",
+      "/nonexistent-xyzzy-relay-gent-test-file.md",
+      "--target",
+      "web",
+    ]);
+
+    // Must indicate the file was not found
+    expect(stderr).toMatch(/not found|does not exist/i);
+
+    // Must fail with exit code 1
+    expect(exitCode).toBe(1);
+  });
+
+  it("does not create a Runner when target is missing", async () => {
+    loadConfigSpy.mockReturnValue(baseConfig({}));
+    await runWithArgs(["watch", "test.md", "--target", "nonexistent"]);
+
+    // Runner constructor should never be called for invalid targets
+    expect(runnerSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not create a Runner when file is missing", async () => {
+    loadConfigSpy.mockReturnValue(baseConfig(MOCK_TARGETS));
+    await runWithArgs([
+      "watch",
+      "/nonexistent-xyzzy-file.md",
+      "--target",
+      "web",
+    ]);
+
+    // Runner constructor should never be called for missing files
+    expect(runnerSpy).not.toHaveBeenCalled();
+  });
+});
+
+// ============================================================
+// Once Command Tests
+// ============================================================
+
+describe("once command", () => {
+  let tmpDir: string;
+  let tmpFile: string;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    loadConfigSpy = vi.spyOn(configLoader, "loadConfig");
+    runnerSpy = vi
+      .spyOn(runnerModule, "Runner")
+      .mockImplementation(() => mockRunnerInstance as unknown as typeof runnerModule.Runner);
+    tmpDir = await mkdtemp(join(tmpdir(), "relay-gent-once-"));
+    tmpFile = join(tmpDir, "test-file.md");
+    await writeFile(tmpFile, "test content", "utf-8");
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("shows error and exits with code 1 when target is not found", async () => {
+    loadConfigSpy.mockReturnValue(baseConfig({}));
+    const { stderr, exitCode } = await runWithArgs([
+      "once",
+      tmpFile,
+      "--target",
+      "nonexistent",
+    ]);
+
+    expect(stderr).toMatch(/not found/i);
+    expect(exitCode).toBe(1);
+  });
+
+  it("shows error and exits with code 1 when file does not exist", async () => {
+    loadConfigSpy.mockReturnValue(baseConfig(MOCK_TARGETS));
+    const { stderr, exitCode } = await runWithArgs([
+      "once",
+      "/nonexistent-xyzzy-relay-gent-test-file.md",
+      "--target",
+      "web",
+    ]);
+
+    expect(stderr).toMatch(/not found|does not exist/i);
+    expect(exitCode).toBe(1);
+  });
+
+  it("exits with code 0 when file exists and target is valid", async () => {
+    loadConfigSpy.mockReturnValue(baseConfig(MOCK_TARGETS));
+    const { exitCode } = await runWithArgs(["once", tmpFile, "--target", "web"]);
+
+    // Success path should exit cleanly
+    expect(exitCode).toBe(0);
+  });
+
+  it("creates a Runner and starts it in once mode on success", async () => {
+    loadConfigSpy.mockReturnValue(baseConfig(MOCK_TARGETS));
+    await runWithArgs(["once", tmpFile, "--target", "web"]);
+
+    // Runner constructor should have been called with the correct target config
+    expect(runnerSpy).toHaveBeenCalledTimes(1);
+    expect(runnerSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ adapter: "opencode" }),
+    );
+
+    // Runner.start should have been called with once:true
+    expect(mockRunnerStart).toHaveBeenCalledTimes(1);
+    expect(mockRunnerStart).toHaveBeenCalledWith({ once: true });
+  });
+
+  it("does not create a Runner when target is missing", async () => {
+    loadConfigSpy.mockReturnValue(baseConfig({}));
+    await runWithArgs(["once", tmpFile, "--target", "nonexistent"]);
+
+    expect(runnerSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not create a Runner when file is missing", async () => {
+    loadConfigSpy.mockReturnValue(baseConfig(MOCK_TARGETS));
+    await runWithArgs([
+      "once",
+      "/nonexistent-xyzzy-file.md",
+      "--target",
+      "web",
+    ]);
+
+    expect(runnerSpy).not.toHaveBeenCalled();
+  });
+});
