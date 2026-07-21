@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
   computeIdentity,
+  computeRecordHash,
   getRecordBody,
   getRecordKey,
   normalizeBody,
@@ -8,13 +9,14 @@ import {
 import { RecordSchema } from "../../../../src/domain/record/record.schema";
 
 // ============================================================
-// Record Identity — stable identity string: `<type>:<key>:<hash>`
+// Record Identity — stable identity + content hash
 // ============================================================
 // Functions:
-//   - getRecordKey(record)    → parser-specific key
-//   - getRecordBody(record)   → text body to hash
-//   - normalizeBody(body)     → NFC → CRLF→LF → trim → strip trailing \n → SHA-256
-//   - computeIdentity(record) → `<type>:<key>:<hash>`
+//   - getRecordKey(record)      → parser-specific key
+//   - getRecordBody(record)     → text body to hash
+//   - normalizeBody(body)       → NFC → CRLF→LF → trim → SHA-256
+//   - computeIdentity(record)   → `<type>:<key>` (stable, no hash)
+//   - computeRecordHash(record) → 64-char hex SHA-256 of normalized body
 // ============================================================
 
 // ------------------------------------------------------------------
@@ -208,16 +210,10 @@ describe("normalizeBody", () => {
 // ------------------------------------------------------------------
 
 describe("computeIdentity", () => {
-  it("returns format type:key:hash", () => {
+  it("returns format type:key (no hash)", () => {
     const identity = computeIdentity(revdiffRecord);
-    const parts = identity.split(":");
-    // type:key:hash → at minimum 3 colon-separated segments
-    // but key itself may contain colons, so check first and last
-    expect(identity.startsWith("revdiff:")).toBe(true);
-    expect(identity.split(":").length).toBeGreaterThanOrEqual(3);
-    // Hash is last 64-char segment
-    const hash = identity.split(":").at(-1);
-    expect(hash).toMatch(/^[0-9a-f]{64}$/);
+    // Identity is now just type:key — no hash segment
+    expect(identity).toBe("revdiff:src/main.ts:42:+");
   });
 
   it("produces stable identity for same record", () => {
@@ -234,29 +230,54 @@ describe("computeIdentity", () => {
 
   it("works for revdiff records", () => {
     const identity = computeIdentity(revdiffRecord);
-    expect(identity).toMatch(/^revdiff:/);
-    expect(identity).toContain("src/main.ts:42:+");
+    expect(identity).toBe("revdiff:src/main.ts:42:+");
   });
 
   it("works for json-lines records", () => {
     const identity = computeIdentity(jsonLinesRecord);
-    expect(identity).toMatch(/^json-lines:/);
-    expect(identity).toContain("2024-01-15T10:30:00Z:INFO");
+    expect(identity).toBe("json-lines:2024-01-15T10:30:00Z:INFO");
   });
 
   it("works for markdown-headers records", () => {
     const identity = computeIdentity(markdownHeadersRecord);
-    expect(identity).toMatch(/^markdown-headers:/);
-    expect(identity).toContain("Installation");
+    expect(identity).toBe("markdown-headers:Installation");
   });
 
   it("works for junit records", () => {
     const identity = computeIdentity(junitRecord);
-    expect(identity).toMatch(/^junit:/);
-    expect(identity).toContain("testShouldPass:com.example.TestSuite");
+    expect(identity).toBe("junit:testShouldPass:com.example.TestSuite");
   });
 
-  it("normalizes whitespace in body before hashing", () => {
+  it("identity does not contain a hash segment", () => {
+    const identity = computeIdentity(revdiffRecord);
+    // Should be exactly two parts split on first colon group — no 64-char hex at end
+    expect(identity).not.toMatch(/[0-9a-f]{64}$/);
+  });
+});
+
+// ------------------------------------------------------------------
+// 5. computeRecordHash
+// ------------------------------------------------------------------
+
+describe("computeRecordHash", () => {
+  it("produces a 64-character hex string (SHA-256)", () => {
+    const hash = computeRecordHash(revdiffRecord);
+    expect(hash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("produces consistent hash for same input", () => {
+    const hash1 = computeRecordHash(revdiffRecord);
+    const hash2 = computeRecordHash(revdiffRecord);
+    expect(hash1).toBe(hash2);
+  });
+
+  it("different inputs produce different hashes", () => {
+    const hash1 = computeRecordHash(revdiffRecord);
+    const hash2 = computeRecordHash(jsonLinesRecord);
+    expect(hash1).not.toBe(hash2);
+  });
+
+  it("normalizes whitespace before hashing", () => {
     const clean = RecordSchema.parse({
       type: "revdiff",
       file: "f.ts",
@@ -271,11 +292,10 @@ describe("computeIdentity", () => {
       annotationType: "+",
       comment: "  clean comment  ",
     });
-    // Same key, same normalized body → same identity
-    expect(computeIdentity(clean)).toBe(computeIdentity(padded));
+    expect(computeRecordHash(clean)).toBe(computeRecordHash(padded));
   });
 
-  it("normalizes CRLF in body before hashing", () => {
+  it("normalizes CRLF before hashing", () => {
     const lf = RecordSchema.parse({
       type: "markdown-headers",
       header: "Test",
@@ -288,6 +308,24 @@ describe("computeIdentity", () => {
       level: 1,
       body: "line1\r\nline2",
     });
-    expect(computeIdentity(lf)).toBe(computeIdentity(crlf));
+    expect(computeRecordHash(lf)).toBe(computeRecordHash(crlf));
+  });
+
+  it("normalizes Unicode NFC vs NFD before hashing", () => {
+    const nfcRecord = RecordSchema.parse({
+      type: "revdiff",
+      file: "f.ts",
+      line: 1,
+      annotationType: "+",
+      comment: "caf\u00e9", // NFC: é as single codepoint U+00E9
+    });
+    const nfdRecord = RecordSchema.parse({
+      type: "revdiff",
+      file: "f.ts",
+      line: 1,
+      annotationType: "+",
+      comment: "cafe\u0301", // NFD: e + combining acute accent U+0301
+    });
+    expect(computeRecordHash(nfcRecord)).toBe(computeRecordHash(nfdRecord));
   });
 });
