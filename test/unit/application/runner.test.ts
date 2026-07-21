@@ -369,4 +369,151 @@ describe("Runner", () => {
       expect(deliveredRecords).not.toContainEqual(unchangedRecord);
     });
   });
+
+  // ----------------------------------------------------------------
+  // 4. stop — state persistence and idempotency
+  // ----------------------------------------------------------------
+  describe("stop", () => {
+    it("persists state after onFileChange has delivered records", async () => {
+      const content = "some content\n";
+      const filePath = join(tmpDir, "source.md");
+      await writeFile(filePath, content, "utf-8");
+
+      const record = RecordSchema.parse({
+        type: "revdiff",
+        file: "src/main.ts",
+        line: 42,
+        annotationType: "+",
+        comment: "persisted record",
+      }) as Record;
+
+      const parser: Parser = {
+        name: "test-parser",
+        parse: () => [record],
+      };
+
+      const adapter: Adapter = {
+        name: "test-adapter",
+        deliver: async (batch: Record[], _ctx: TargetConfig) =>
+          batch.map((_, i) => `mock-${i}`),
+        ready: async () => true,
+      };
+
+      const runner = new Runner(config, parser, adapter, tracker, store);
+      await runner.onFileChange(filePath);
+      await runner.stop();
+
+      // Create a fresh StateStore from the same location to verify persistence
+      const store2 = new StateStore("runner-test", tmpDir);
+      await store2.load();
+
+      const identity = computeIdentity(record);
+      const stored = store2.get(identity);
+      expect(stored).toBeDefined();
+      expect(stored!.hash).toBe(computeRecordHash(record));
+    });
+
+    it("can be called multiple times without error", async () => {
+      const runner = new Runner(config, mockParser, mockAdapter, tracker, store);
+
+      // First call must resolve
+      await expect(runner.stop()).resolves.toBeUndefined();
+
+      // Second call must also resolve (idempotent)
+      await expect(runner.stop()).resolves.toBeUndefined();
+    });
+  });
+
+  // ----------------------------------------------------------------
+  // 5. error handling — individual pipeline stages propagate errors
+  // ----------------------------------------------------------------
+  describe("error handling", () => {
+    it("parser error is caught and logged", async () => {
+      const filePath = join(tmpDir, "source.md");
+      await writeFile(filePath, "content with records", "utf-8");
+
+      const throwingParser: Parser = {
+        name: "throwing-parser",
+        parse: (_content: string): Record[] => {
+          throw new Error("parse error");
+        },
+      };
+
+      const errorSpy = spyOn(console, "error");
+
+      const runner = new Runner(config, throwingParser, mockAdapter, tracker, store);
+      await expect(runner.onFileChange(filePath)).resolves.toBeUndefined();
+
+      expect(errorSpy).toHaveBeenCalled();
+
+      errorSpy.mockRestore();
+    });
+
+    it("adapter deliver error is caught and logged", async () => {
+      const filePath = join(tmpDir, "source.md");
+      await writeFile(filePath, "content with records", "utf-8");
+
+      const producingParser: Parser = {
+        name: "producing-parser",
+        parse: () => [
+          RecordSchema.parse({
+            type: "revdiff",
+            file: "src/main.ts",
+            line: 1,
+            annotationType: "+",
+            comment: "test record",
+          }) as Record,
+        ],
+      };
+
+      const throwingAdapter: Adapter = {
+        name: "throwing-adapter",
+        deliver: async (_batch: Record[], _ctx: TargetConfig) => {
+          throw new Error("deliver failed");
+        },
+        ready: async () => true,
+      };
+
+      const errorSpy = spyOn(console, "error");
+
+      const runner = new Runner(config, producingParser, throwingAdapter, tracker, store);
+      await expect(runner.onFileChange(filePath)).resolves.toBeUndefined();
+
+      expect(errorSpy).toHaveBeenCalled();
+
+      errorSpy.mockRestore();
+    });
+
+    it("delta filter error is caught and logged", async () => {
+      const filePath = join(tmpDir, "source.md");
+      await writeFile(filePath, "content with records", "utf-8");
+
+      const producingParser: Parser = {
+        name: "producing-parser",
+        parse: () => [
+          RecordSchema.parse({
+            type: "revdiff",
+            file: "src/main.ts",
+            line: 1,
+            annotationType: "+",
+            comment: "test record",
+          }) as Record,
+        ],
+      };
+
+      const filterSpy = spyOn(tracker, "filter").mockRejectedValue(
+        new Error("filter failed"),
+      );
+
+      const errorSpy = spyOn(console, "error");
+
+      const runner = new Runner(config, producingParser, mockAdapter, tracker, store);
+      await expect(runner.onFileChange(filePath)).resolves.toBeUndefined();
+
+      expect(errorSpy).toHaveBeenCalled();
+
+      filterSpy.mockRestore();
+      errorSpy.mockRestore();
+    });
+  });
 });
