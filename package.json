@@ -4,6 +4,9 @@
   "description": "A CLI tool designed to watch a file its changes and relay the delta of those changes to a coding agent.",
   "type": "module",
   "main": "src/index.ts",
+  "bin": {
+    "relay-gent": "./bin/relay-gent.ts"
+  },
   "scripts": {
     "test": "bun test",
     "check": "biome check src/",
