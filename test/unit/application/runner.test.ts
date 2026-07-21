@@ -516,4 +516,198 @@ describe("Runner", () => {
       errorSpy.mockRestore();
     });
   });
+
+  // ----------------------------------------------------------------
+  // 6. start — one-shot processing of watchPath
+  // ----------------------------------------------------------------
+  describe("start", () => {
+    // ------------------------------------------------------------------
+    // Test 1: Happy path — loads state, processes watchPath, delivers
+    // ------------------------------------------------------------------
+    it("start({ once: true }) loads state and processes watchPath", async () => {
+      const filePath = join(tmpDir, "watch-source.md");
+      await writeFile(filePath, "test content for start", "utf-8");
+      config = testConfig({ watchPath: filePath });
+
+      const expectedRecords: Record[] = [
+        RecordSchema.parse({
+          type: "revdiff",
+          file: "src/main.ts",
+          line: 42,
+          annotationType: "+",
+          comment: "start mode record",
+        }) as Record,
+      ];
+
+      let parsedContent = "";
+      const parser: Parser = {
+        name: "test-parser",
+        parse: (c: string) => {
+          parsedContent = c;
+          return expectedRecords;
+        },
+      };
+
+      const deliveredRecords: Record[] = [];
+      const adapter: Adapter = {
+        name: "test-adapter",
+        deliver: async (batch: Record[], _ctx: TargetConfig) => {
+          deliveredRecords.push(...batch);
+          return batch.map((_, i) => `mock-${i}`);
+        },
+        ready: async () => true,
+      };
+
+      const runner = new Runner(config, parser, adapter, tracker, store);
+      await runner.start({ once: true });
+
+      // State must be loaded before processing (load() is called internally)
+      // Pipeline must have read the watchPath file and forwarded to parser
+      expect(parsedContent).toBe("test content for start");
+
+      // Records must have been delivered to the adapter
+      expect(deliveredRecords).toHaveLength(1);
+      expect(deliveredRecords).toEqual(expectedRecords);
+
+      // Records must be persisted in the store
+      for (const record of expectedRecords) {
+        const identity = computeIdentity(record);
+        const stored = store.get(identity);
+        expect(stored).toBeDefined();
+        expect(stored!.hash).toBe(computeRecordHash(record));
+      }
+
+      // Store has non-empty state after start completes
+      expect(store.totalDelivered).toBeGreaterThan(0);
+    });
+
+    // ------------------------------------------------------------------
+    // Test 2: Respects previously delivered state
+    // ------------------------------------------------------------------
+    it("start({ once: true }) respects previously delivered state", async () => {
+      const filePath = join(tmpDir, "watch-source.md");
+      await writeFile(filePath, "test content", "utf-8");
+      config = testConfig({ watchPath: filePath });
+
+      // Pre-deliver one record to simulate prior delivery
+      const priorRecord = RecordSchema.parse({
+        type: "revdiff",
+        file: "src/old.ts",
+        line: 1,
+        annotationType: "+",
+        comment: "already delivered",
+      }) as Record;
+
+      const priorIdentity = computeIdentity(priorRecord);
+      const priorHash = computeRecordHash(priorRecord);
+      store.set(priorIdentity, priorHash);
+      await store.save();
+
+      // A brand-new record that has never been seen
+      const newRecord = RecordSchema.parse({
+        type: "revdiff",
+        file: "src/new.ts",
+        line: 10,
+        annotationType: "+",
+        comment: "brand new record",
+      }) as Record;
+
+      let parseCallCount = 0;
+      const parser: Parser = {
+        name: "test-parser",
+        parse: () => {
+          parseCallCount++;
+          return [priorRecord, newRecord];
+        },
+      };
+
+      const deliveredRecords: Record[] = [];
+      const adapter: Adapter = {
+        name: "test-adapter",
+        deliver: async (batch: Record[], _ctx: TargetConfig) => {
+          deliveredRecords.push(...batch);
+          return batch.map((_, i) => `mock-${i}`);
+        },
+        ready: async () => true,
+      };
+
+      const runner = new Runner(config, parser, adapter, tracker, store);
+      await runner.start({ once: true });
+
+      // Parser must have been called once
+      expect(parseCallCount).toBe(1);
+
+      // Only the new record should be delivered (previously delivered one is
+      // filtered out by DeltaTracker)
+      expect(deliveredRecords).toHaveLength(1);
+      expect(deliveredRecords[0]).toEqual(newRecord);
+      expect(deliveredRecords).not.toContainEqual(priorRecord);
+    });
+
+    // ------------------------------------------------------------------
+    // Test 3: Missing watchPath — error is caught and logged
+    // ------------------------------------------------------------------
+    it("start({ once: true }) handles missing watchPath gracefully", async () => {
+      const missingPath = join(tmpDir, "nonexistent.md");
+      config = testConfig({ watchPath: missingPath });
+
+      const parser: Parser = { name: "test-parser", parse: () => [] };
+      const adapter: Adapter = {
+        name: "test-adapter",
+        deliver: async (batch: Record[], _ctx: TargetConfig) =>
+          batch.map((_, i) => `mock-${i}`),
+        ready: async () => true,
+      };
+
+      const errorSpy = spyOn(console, "error");
+
+      const runner = new Runner(config, parser, adapter, tracker, store);
+
+      // Must NOT throw — error is caught and logged internally (same pattern
+      // as onFileChange for missing files)
+      await expect(runner.start({ once: true })).resolves.toBeUndefined();
+
+      // Must have logged the file-not-found error
+      expect(errorSpy).toHaveBeenCalled();
+
+      errorSpy.mockRestore();
+    });
+
+    // ------------------------------------------------------------------
+    // Test 4: Idempotent — calling start twice does not error
+    // ------------------------------------------------------------------
+    it("start({ once: true }) can be called multiple times without error", async () => {
+      const filePath = join(tmpDir, "watch-source.md");
+      await writeFile(filePath, "idempotent test content", "utf-8");
+      config = testConfig({ watchPath: filePath });
+
+      const parser: Parser = {
+        name: "test-parser",
+        parse: () => [
+          RecordSchema.parse({
+            type: "revdiff",
+            file: "src/main.ts",
+            line: 42,
+            annotationType: "+",
+            comment: "idempotent test record",
+          }) as Record,
+        ],
+      };
+
+      const adapter: Adapter = {
+        name: "test-adapter",
+        deliver: async (batch: Record[], _ctx: TargetConfig) =>
+          batch.map((_, i) => `mock-${i}`),
+        ready: async () => true,
+      };
+
+      const runner = new Runner(config, parser, adapter, tracker, store);
+
+      // First call must resolve
+      await expect(runner.start({ once: true })).resolves.toBeUndefined();
+
+      // Second call must also resolve (idempotent — processes again or is no-op)
+      await expect(runner.start({ once: true })).resolves.toBeUndefined();
+    });
+  });
 });

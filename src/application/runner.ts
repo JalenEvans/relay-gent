@@ -47,6 +47,18 @@ export class Runner {
   }
 
   /**
+   * Start the runner in one-shot mode.
+   * Loads persisted state, then processes the configured watch path
+   * through the full pipeline (read -> parse -> filter -> deliver -> mark).
+   */
+  async start(options: { once: boolean }): Promise<void> {
+    if (options.once) {
+      await this.store.load();
+      await this.onFileChange(this.config.watchPath);
+    }
+  }
+
+  /**
    * Gracefully stop the runner, persisting current state.
    */
   async stop(): Promise<void> {
