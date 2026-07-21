@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -21,7 +21,8 @@ import type { Adapter } from "../../../src/domain/adapter/adapter.interface";
 import { TargetConfigSchema } from "../../../src/domain/config/config.schema";
 import type { TargetConfig } from "../../../src/domain/config/config.schema";
 import type { Parser } from "../../../src/domain/parser/parser.interface";
-import type { Record } from "../../../src/domain/record/record.schema";
+import { RecordSchema, type Record } from "../../../src/domain/record/record.schema";
+import { computeIdentity, computeRecordHash } from "../../../src/domain/record/record-identity";
 import { DeltaTracker } from "../../../src/core/delta";
 import { StateStore } from "../../../src/state/store";
 
@@ -119,6 +120,253 @@ describe("Runner", () => {
       const runner = new Runner(config, mockParser, mockAdapter, tracker, store);
       expect(runner.stop).toBeDefined();
       expect(typeof runner.stop).toBe("function");
+    });
+  });
+
+  // ----------------------------------------------------------------
+  // 3. onFileChange — full pipeline (reads → parses → filters → delivers → marks)
+  // ----------------------------------------------------------------
+  describe("onFileChange", () => {
+    // ------------------------------------------------------------------
+    // Test 1: Happy path — read, parse, filter, deliver, mark delivered
+    // ------------------------------------------------------------------
+    it("reads file, parses, filters, delivers, and marks delivered", async () => {
+      const content = "test file content\nwith multiple lines\n";
+      const filePath = join(tmpDir, "source.md");
+      await writeFile(filePath, content, "utf-8");
+
+      const expectedRecords: Record[] = [
+        RecordSchema.parse({
+          type: "revdiff",
+          file: "src/main.ts",
+          line: 42,
+          annotationType: "+",
+          comment: "first record",
+        }) as Record,
+        RecordSchema.parse({
+          type: "revdiff",
+          file: "src/utils.ts",
+          line: 10,
+          annotationType: "-",
+          comment: "second record",
+        }) as Record,
+      ];
+
+      let parsedContent = "";
+      const parser: Parser = {
+        name: "test-parser",
+        parse: (c: string) => {
+          parsedContent = c;
+          return expectedRecords;
+        },
+      };
+
+      const deliveredRecords: Record[] = [];
+      const adapter: Adapter = {
+        name: "test-adapter",
+        deliver: async (batch: Record[], _ctx: TargetConfig) => {
+          deliveredRecords.push(...batch);
+          return batch.map((_, i) => `mock-${i}`);
+        },
+        ready: async () => true,
+      };
+
+      const runner = new Runner(config, parser, adapter, tracker, store);
+      await runner.onFileChange(filePath);
+
+      // Pipeline must have read the file and forwarded content to the parser
+      expect(parsedContent).toBe(content);
+
+      // Both records must be delivered
+      expect(deliveredRecords).toHaveLength(2);
+      expect(deliveredRecords).toEqual(expectedRecords);
+
+      // Delivery markers must be persisted in the store
+      for (const record of expectedRecords) {
+        const identity = computeIdentity(record);
+        const stored = store.get(identity);
+        expect(stored).toBeDefined();
+        expect(stored!.hash).toBe(computeRecordHash(record));
+      }
+    });
+
+    // ------------------------------------------------------------------
+    // Test 2: Unchanged records — delta filter must skip delivery
+    // ------------------------------------------------------------------
+    it("does not deliver unchanged records", async () => {
+      const record = RecordSchema.parse({
+        type: "revdiff",
+        file: "src/main.ts",
+        line: 42,
+        annotationType: "+",
+        comment: "already delivered content",
+      }) as Record;
+
+      // Pre-insert into store to simulate prior delivery
+      const identity = computeIdentity(record);
+      const hash = computeRecordHash(record);
+      store.set(identity, hash);
+      await store.save();
+
+      const filePath = join(tmpDir, "unchanged.md");
+      await writeFile(filePath, "some content", "utf-8");
+
+      let parseCount = 0;
+      const parser: Parser = {
+        name: "test-parser",
+        parse: () => {
+          parseCount++;
+          return [record];
+        },
+      };
+
+      const deliveredRecords: Record[] = [];
+      const adapter: Adapter = {
+        name: "test-adapter",
+        deliver: async (batch: Record[], _ctx: TargetConfig) => {
+          deliveredRecords.push(...batch);
+          return batch.map((_, i) => `mock-${i}`);
+        },
+        ready: async () => true,
+      };
+
+      const runner = new Runner(config, parser, adapter, tracker, store);
+      await runner.onFileChange(filePath);
+
+      // Pipeline must have run parse
+      expect(parseCount).toBe(1);
+
+      // No records should be delivered (all are unchanged)
+      expect(deliveredRecords).toHaveLength(0);
+    });
+
+    // ------------------------------------------------------------------
+    // Test 3: Empty file — should not crash or deliver
+    // ------------------------------------------------------------------
+    it("handles empty file — no delivery", async () => {
+      const filePath = join(tmpDir, "empty.md");
+      await writeFile(filePath, "", "utf-8");
+
+      let parseCount = 0;
+      const parser: Parser = {
+        name: "test-parser",
+        parse: (content: string) => {
+          parseCount++;
+          expect(content).toBe("");
+          return [];
+        },
+      };
+
+      const deliveredRecords: Record[] = [];
+      const adapter: Adapter = {
+        name: "test-adapter",
+        deliver: async (batch: Record[], _ctx: TargetConfig) => {
+          deliveredRecords.push(...batch);
+          return batch.map((_, i) => `mock-${i}`);
+        },
+        ready: async () => true,
+      };
+
+      const runner = new Runner(config, parser, adapter, tracker, store);
+      await runner.onFileChange(filePath);
+
+      // Pipeline must have run parse
+      expect(parseCount).toBe(1);
+
+      // Empty set → nothing to deliver
+      expect(deliveredRecords).toHaveLength(0);
+    });
+
+    // ------------------------------------------------------------------
+    // Test 4: Missing file — error must be caught, not thrown
+    // ------------------------------------------------------------------
+    it("handles missing file gracefully", async () => {
+      const missingPath = join(tmpDir, "nonexistent.md");
+
+      const parser: Parser = { name: "test-parser", parse: () => [] };
+      const adapter: Adapter = {
+        name: "test-adapter",
+        deliver: async (batch: Record[], _ctx: TargetConfig) =>
+          batch.map((_, i) => `mock-${i}`),
+        ready: async () => true,
+      };
+
+      const runner = new Runner(config, parser, adapter, tracker, store);
+
+      // Spy on console.error to verify the error is logged
+      const errorSpy = spyOn(console, "error");
+
+      // Must NOT throw — error is caught and logged internally
+      await expect(runner.onFileChange(missingPath)).resolves.toBeUndefined();
+
+      // Must have logged the file-not-found error
+      expect(errorSpy).toHaveBeenCalled();
+
+      errorSpy.mockRestore();
+    });
+
+    // ------------------------------------------------------------------
+    // Test 5: Mix of unchanged, new, and changed — deliver only new+changed
+    // ------------------------------------------------------------------
+    it("delivers both new and changed records", async () => {
+      // Pre-deliver one record (will be unchanged when re-parsed)
+      const unchangedRecord = RecordSchema.parse({
+        type: "revdiff",
+        file: "src/main.ts",
+        line: 42,
+        annotationType: "+",
+        comment: "This is the original content",
+      }) as Record;
+
+      const unchangedIdentity = computeIdentity(unchangedRecord);
+      const unchangedHash = computeRecordHash(unchangedRecord);
+      store.set(unchangedIdentity, unchangedHash);
+      await store.save();
+
+      // A brand-new record (never seen before)
+      const newRecord = RecordSchema.parse({
+        type: "revdiff",
+        file: "src/new.ts",
+        line: 1,
+        annotationType: "+",
+        comment: "brand new record content",
+      }) as Record;
+
+      // A changed record (same identity as unchanged, different body → different hash)
+      const changedRecord = RecordSchema.parse({
+        type: "revdiff",
+        file: "src/main.ts",
+        line: 42,
+        annotationType: "+",
+        comment: "This content has been modified",
+      }) as Record;
+
+      const filePath = join(tmpDir, "mixed.md");
+      await writeFile(filePath, "some content", "utf-8");
+
+      const parser: Parser = {
+        name: "test-parser",
+        parse: () => [unchangedRecord, newRecord, changedRecord],
+      };
+
+      const deliveredRecords: Record[] = [];
+      const adapter: Adapter = {
+        name: "test-adapter",
+        deliver: async (batch: Record[], _ctx: TargetConfig) => {
+          deliveredRecords.push(...batch);
+          return batch.map((_, i) => `mock-${i}`);
+        },
+        ready: async () => true,
+      };
+
+      const runner = new Runner(config, parser, adapter, tracker, store);
+      await runner.onFileChange(filePath);
+
+      // Only 2 should be delivered: new + changed, NOT the unchanged one
+      expect(deliveredRecords).toHaveLength(2);
+      expect(deliveredRecords).toContainEqual(newRecord);
+      expect(deliveredRecords).toContainEqual(changedRecord);
+      expect(deliveredRecords).not.toContainEqual(unchangedRecord);
     });
   });
 });
