@@ -1,6 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import * as fc from "fast-check";
-import { computeIdentity, computeRecordHash, normalizeBody } from "../../../../src/domain/record/record-identity";
+import {
+  computeIdentity,
+  computeRecordHash,
+  normalizeBody,
+} from "../../../../src/domain/record/record-identity";
 import { RecordSchema } from "../../../../src/domain/record/record.schema";
 
 // ============================================================
@@ -144,7 +148,6 @@ describe("Property-Based Tests", () => {
         );
       }
     });
-
   });
 
   // ------------------------------------------------------------------

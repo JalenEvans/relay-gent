@@ -1,13 +1,13 @@
 import { describe, expect, it } from "bun:test";
 import type { z } from "zod";
-import {
-  type JunitRecordSchema,
-  type JsonLinesRecordSchema,
-  type MarkdownHeadersRecordSchema,
-  type RevdiffRecordSchema,
-  RecordSchema,
-} from "../../../../src/domain/record/record.schema";
 import { formatRecord, formatRecords } from "../../../../src/domain/adapter/formatter";
+import {
+  type JsonLinesRecordSchema,
+  type JunitRecordSchema,
+  type MarkdownHeadersRecordSchema,
+  RecordSchema,
+  type RevdiffRecordSchema,
+} from "../../../../src/domain/record/record.schema";
 
 // ============================================================
 // formatRecord / formatRecords — formatting layer for Record types
@@ -146,9 +146,7 @@ describe("formatRecord", () => {
         comment: "Added [bracket] and {brace} and (parens)",
       });
       const result = formatRecord(record);
-      expect(result).toBe(
-        "[src/main.ts:1] (+)\nAdded [bracket] and {brace} and (parens)",
-      );
+      expect(result).toBe("[src/main.ts:1] (+)\nAdded [bracket] and {brace} and (parens)");
     });
 
     it("handles newline in comment", () => {
@@ -233,9 +231,7 @@ describe("formatRecord", () => {
         message: "Stack trace:\n  at fn()\n  at main()",
       });
       const result = formatRecord(record);
-      expect(result).toBe(
-        "[2024-01-15T10:30:00Z] [DEBUG] Stack trace:\n  at fn()\n  at main()",
-      );
+      expect(result).toBe("[2024-01-15T10:30:00Z] [DEBUG] Stack trace:\n  at fn()\n  at main()");
     });
   });
 
@@ -300,9 +296,7 @@ describe("formatRecord", () => {
         body: "Body text",
       });
       const result = formatRecord(record);
-      expect(result).toBe(
-        "## Special: [chars] {and} (more)\nBody text",
-      );
+      expect(result).toBe("## Special: [chars] {and} (more)\nBody text");
     });
 
     it("handles multiline body", () => {
@@ -606,12 +600,7 @@ describe("Fuzz (fast-check)", () => {
   });
 
   it("formatRecords always returns a string", () => {
-    const records = [
-      makeRevdiff(),
-      makeJsonLines(),
-      makeMarkdownHeaders(),
-      makeJunit(),
-    ];
+    const records = [makeRevdiff(), makeJsonLines(), makeMarkdownHeaders(), makeJunit()];
     const result = formatRecords(records);
     expect(typeof result).toBe("string");
     expect(result.length).toBeGreaterThan(0);

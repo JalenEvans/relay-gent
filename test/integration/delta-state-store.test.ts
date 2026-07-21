@@ -3,10 +3,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DeltaTracker } from "../../src/core/delta";
-import { StateStore } from "../../src/state/store";
-import { RecordSchema } from "../../src/domain/record/record.schema";
 import { computeIdentity } from "../../src/domain/record/record-identity";
+import { RecordSchema } from "../../src/domain/record/record.schema";
 import type { Record } from "../../src/domain/record/record.schema";
+import { StateStore } from "../../src/state/store";
 
 // ============================================================
 // Integration: DeltaTracker + StateStore working together
@@ -42,11 +42,7 @@ function revdiffRecord(
 }
 
 /** Build a valid json-lines record fixture */
-function jsonLinesRecord(
-  message: string,
-  timestamp?: string,
-  level?: string,
-): Record {
+function jsonLinesRecord(message: string, timestamp?: string, level?: string): Record {
   return RecordSchema.parse({
     type: "json-lines",
     message,
@@ -231,11 +227,7 @@ describe("DeltaTracker + StateStore integration", () => {
 
       // Second batch — some new, some changed, some unchanged
       const unchangedRevdiff = revdiffRecord("src/a.ts", 1, "+", "Add feature A");
-      const changedJsonLines = jsonLinesRecord(
-        "Deploy completed",
-        "2024-06-01T08:00:00Z",
-        "info",
-      );
+      const changedJsonLines = jsonLinesRecord("Deploy completed", "2024-06-01T08:00:00Z", "info");
       const unchangedMarkdown = markdownHeadersRecord("Setup", "Step 1: configure");
       const newRevdiff = revdiffRecord("src/c.ts", 10, "file-level", "New file annotation");
 
