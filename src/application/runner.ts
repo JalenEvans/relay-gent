@@ -1,4 +1,6 @@
-import { readFile } from "node:fs/promises";
+import { readFile, stat, readdir } from "node:fs/promises";
+import { join } from "node:path";
+import chokidar, { type FSWatcher } from "chokidar";
 import type { Adapter } from "../domain/adapter/adapter.interface";
 import type { TargetConfig } from "../domain/config/config.schema";
 import type { Parser } from "../domain/parser/parser.interface";
@@ -12,6 +14,8 @@ import { StateStore } from "../state/store";
 // ============================================================
 
 export class Runner {
+  private watcher?: FSWatcher;
+
   constructor(
     public readonly config: TargetConfig,
     private readonly parser: Parser,
@@ -47,21 +51,78 @@ export class Runner {
   }
 
   /**
-   * Start the runner in one-shot mode.
-   * Loads persisted state, then processes the configured watch path
-   * through the full pipeline (read -> parse -> filter -> deliver -> mark).
+   * Start the runner.
+   *
+   * In **foreground mode** (`{ foreground: true }`):
+   * 1. Loads persisted state.
+   * 2. Processes the configured watch path immediately (initial file).
+   * 3. Sets up a chokidar file watcher on the watch path to handle
+   *    subsequent `add` and `change` events.
+   *
+   * In **one-shot mode** (`{ once: true }`):
+   * 1. Loads persisted state.
+   * 2. Processes the configured watch path once.
    */
-  async start(options: { once: boolean }): Promise<void> {
-    if (options.once) {
-      await this.store.load();
+  async start(options: { once?: boolean; foreground?: boolean }): Promise<void> {
+    await this.store.load();
+
+    if (options.foreground) {
+      // Process the initial file(s). If watchPath is a directory, enumerate
+      // its current files so they are not missed by the watcher (which uses
+      // ignoreInitial: true to avoid re-processing).
+      try {
+        const pathStat = await stat(this.config.watchPath);
+        if (pathStat.isDirectory()) {
+          const entries = await readdir(this.config.watchPath, {
+            withFileTypes: true,
+          });
+          for (const entry of entries) {
+            if (entry.isFile()) {
+              await this.onFileChange(join(this.config.watchPath, entry.name));
+            }
+          }
+        } else {
+          await this.onFileChange(this.config.watchPath);
+        }
+      } catch {
+        // File not found or other error — onFileChange handles logging
+        await this.onFileChange(this.config.watchPath);
+      }
+
+      // Set up file watcher — event handlers must be attached BEFORE
+      // awaiting "ready" to avoid missing events during initialization.
+      this.watcher = chokidar.watch(this.config.watchPath, {
+        awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 100 },
+        ignoreInitial: true, // we already processed the initial file(s)
+      });
+
+      this.watcher.on("add", (filePath: string) => {
+        this.onFileChange(filePath);
+      });
+
+      this.watcher.on("change", (filePath: string) => {
+        this.onFileChange(filePath);
+      });
+
+      // Wait for the watcher to complete its initial scan before resolving.
+      // This ensures that any file writes after start() returns will be
+      // detected as new events rather than being swallowed by ignoreInitial.
+      await new Promise<void>((resolve) => {
+        this.watcher!.on("ready", resolve);
+      });
+    } else if (options.once) {
       await this.onFileChange(this.config.watchPath);
     }
   }
 
   /**
-   * Gracefully stop the runner, persisting current state.
+   * Gracefully stop the runner, closing the file watcher if active
+   * and persisting current state.
    */
   async stop(): Promise<void> {
+    if (this.watcher) {
+      await this.watcher.close();
+    }
     await this.store.save();
   }
 }

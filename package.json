@@ -18,6 +18,7 @@
     "typescript": "^5.0.0"
   },
   "dependencies": {
+    "chokidar": "^5.0.0",
     "zod": "^3.23.0"
   },
   "trustedDependencies": [

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -70,7 +71,9 @@ export class StateStore {
 
   /**
    * Persist state to disk using an atomic write pattern:
-   * write to statePath.tmp, then rename to statePath.
+   * write to a unique temporary file, then rename to statePath.
+   * Uses a unique temp-file name per call to prevent race conditions
+   * when save() is invoked concurrently (e.g. from markDelivered and stop()).
    * Updates last_run to the current ISO timestamp.
    * Creates the target directory if it doesn't exist.
    */
@@ -87,7 +90,10 @@ export class StateStore {
       total_delivered: this._totalDelivered,
     };
 
-    const tmpPath = `${this.statePath}.tmp`;
+    // Use a unique temp file per invocation so concurrent save() calls
+    // do not race on the same path (one rename would consume the temp
+    // file, leaving the other with nothing to rename).
+    const tmpPath = `${this.statePath}.${randomUUID()}.tmp`;
     await writeFile(tmpPath, `${JSON.stringify(data, null, 2)}\n`, "utf-8");
     await rename(tmpPath, this.statePath);
   }

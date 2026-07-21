@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -708,6 +708,361 @@ describe("Runner", () => {
 
       // Second call must also resolve (idempotent — processes again or is no-op)
       await expect(runner.start({ once: true })).resolves.toBeUndefined();
+    });
+  });
+
+  // ----------------------------------------------------------------
+  // 7. start — foreground mode (file watching)
+  // ----------------------------------------------------------------
+  describe("start — foreground mode", () => {
+    // ------------------------------------------------------------------
+    // Helper: create a deferred promise for async coordination
+    // ------------------------------------------------------------------
+    function defer<T>(): {
+      promise: Promise<T>;
+      resolve: (value: T) => void;
+    } {
+      let resolve!: (value: T) => void;
+      const promise = new Promise<T>((r) => {
+        resolve = r;
+      });
+      return { promise, resolve };
+    }
+
+    // ------------------------------------------------------------------
+    // Test 1: Initial file at watchPath is processed on startup
+    // ------------------------------------------------------------------
+    it("processes initial file at watchPath on startup", async () => {
+      const filePath = join(tmpDir, "foreground-init.md");
+      await writeFile(filePath, "initial content for foreground mode", "utf-8");
+      config = testConfig({ watchPath: filePath });
+
+      const { promise: delivered, resolve: resolveDelivered } =
+        defer<Record[]>();
+
+      const expectedRecords: Record[] = [
+        RecordSchema.parse({
+          type: "revdiff",
+          file: "src/main.ts",
+          line: 42,
+          annotationType: "+",
+          comment: "foreground initial record",
+        }) as Record,
+      ];
+
+      const parser: Parser = {
+        name: "test-parser",
+        parse: () => expectedRecords,
+      };
+
+      const adapter: Adapter = {
+        name: "test-adapter",
+        deliver: async (batch: Record[], _ctx: TargetConfig) => {
+          resolveDelivered(batch);
+          return batch.map((_, i) => `mock-${i}`);
+        },
+        ready: async () => true,
+      };
+
+      const runner = new Runner(config, parser, adapter, tracker, store);
+      await runner.start({ foreground: true });
+
+      // Wait for delivery with timeout
+      const records = await Promise.race([
+        delivered,
+        new Promise<null>(
+          (_, reject) =>
+            setTimeout(
+              () =>
+                reject(
+                  new Error(
+                    "Timeout: initial file was never delivered",
+                  ),
+                ),
+              3000,
+            ),
+        ),
+      ]);
+
+      expect(records).toBeDefined();
+      expect(records).toHaveLength(1);
+      expect(records![0]).toEqual(expectedRecords[0]);
+
+      // Delivery state must be persisted
+      const identity = computeIdentity(expectedRecords[0]);
+      const stored = store.get(identity);
+      expect(stored).toBeDefined();
+      expect(stored!.hash).toBe(computeRecordHash(expectedRecords[0]));
+
+      await runner.stop();
+    });
+
+    // ------------------------------------------------------------------
+    // Test 2: Newly created files in watch directory
+    // ------------------------------------------------------------------
+    it("detects newly created files in watch directory", async () => {
+      const watchDir = join(tmpDir, "watch-new-files");
+      await mkdir(watchDir, { recursive: true });
+      config = testConfig({ watchPath: watchDir });
+
+      const { promise: delivered, resolve: resolveDelivered } =
+        defer<Record[]>();
+
+      const parser: Parser = {
+        name: "test-parser",
+        parse: (content: string) => [
+          RecordSchema.parse({
+            type: "revdiff",
+            file: "tmp.md",
+            line: 1,
+            annotationType: "+",
+            comment: `detected: ${content.trim()}`,
+          }) as Record,
+        ],
+      };
+
+      const adapter: Adapter = {
+        name: "test-adapter",
+        deliver: async (batch: Record[], _ctx: TargetConfig) => {
+          resolveDelivered(batch);
+          return batch.map((_, i) => `mock-${i}`);
+        },
+        ready: async () => true,
+      };
+
+      const runner = new Runner(config, parser, adapter, tracker, store);
+      await runner.start({ foreground: true });
+
+      // Write a new file — watcher should pick it up
+      const filePath = join(watchDir, "new-output.md");
+      await writeFile(filePath, "new file content", "utf-8");
+
+      const records = await Promise.race([
+        delivered,
+        new Promise<null>(
+          (_, reject) =>
+            setTimeout(
+              () =>
+                reject(
+                  new Error(
+                    "Timeout: new file was never delivered",
+                  ),
+                ),
+              3000,
+            ),
+        ),
+      ]);
+
+      expect(records).toBeDefined();
+      expect(records).toHaveLength(1);
+
+      await runner.stop();
+    });
+
+    // ------------------------------------------------------------------
+    // Test 3: Modified files in watch directory
+    // ------------------------------------------------------------------
+    it("processes modified files", async () => {
+      const watchDir = join(tmpDir, "watch-modified");
+      await mkdir(watchDir, { recursive: true });
+      config = testConfig({ watchPath: watchDir });
+
+      let deliveryCount = 0;
+      const { promise: secondDelivery, resolve: resolveSecondDelivery } =
+        defer<Record[]>();
+
+      const parser: Parser = {
+        name: "test-parser",
+        parse: (content: string) => [
+          RecordSchema.parse({
+            type: "revdiff",
+            file: "modified.md",
+            line: 1,
+            annotationType: "+",
+            comment: `content: ${content.trim()}`,
+          }) as Record,
+        ],
+      };
+
+      const adapter: Adapter = {
+        name: "test-adapter",
+        deliver: async (batch: Record[], _ctx: TargetConfig) => {
+          deliveryCount++;
+          if (deliveryCount === 2) {
+            resolveSecondDelivery(batch);
+          }
+          return batch.map((_, i) => `mock-${i}`);
+        },
+        ready: async () => true,
+      };
+
+      const runner = new Runner(config, parser, adapter, tracker, store);
+      await runner.start({ foreground: true });
+
+      // Write initial file
+      const filePath = join(watchDir, "modified.md");
+      await writeFile(filePath, "version 1", "utf-8");
+
+      // Wait a beat for the initial event, then modify
+      await new Promise((r) => setTimeout(r, 300));
+      await writeFile(filePath, "version 2 — modified", "utf-8");
+
+      // Wait for the second delivery (modification)
+      const records = await Promise.race([
+        secondDelivery,
+        new Promise<null>(
+          (_, reject) =>
+            setTimeout(
+              () =>
+                reject(
+                  new Error(
+                    "Timeout: modified file was never delivered",
+                  ),
+                ),
+              5000,
+            ),
+        ),
+      ]);
+
+      expect(records).toBeDefined();
+      expect(records).toHaveLength(1);
+      expect((records![0] as { comment: string }).comment).toContain("version 2");
+
+      await runner.stop();
+    });
+
+    // ------------------------------------------------------------------
+    // Test 4: Loads state before watching (skips already-delivered)
+    // ------------------------------------------------------------------
+    it("start({ foreground: true }) loads state before watching", async () => {
+      const watchDir = join(tmpDir, "watch-state");
+      await mkdir(watchDir, { recursive: true });
+      config = testConfig({ watchPath: watchDir });
+
+      // Pre-populate store with a delivered record
+      const priorRecord = RecordSchema.parse({
+        type: "revdiff",
+        file: "src/prior.ts",
+        line: 1,
+        annotationType: "+",
+        comment: "already delivered content",
+      }) as Record;
+
+      const priorIdentity = computeIdentity(priorRecord);
+      const priorHash = computeRecordHash(priorRecord);
+      store.set(priorIdentity, priorHash);
+      await store.save();
+
+      const newRecord = RecordSchema.parse({
+        type: "revdiff",
+        file: "src/new.ts",
+        line: 10,
+        annotationType: "+",
+        comment: "brand new content",
+      }) as Record;
+
+      const deliveredRecords: Record[] = [];
+      const { promise: allDeliveries, resolve: resolveDeliveries } =
+        defer<void>();
+
+      const parser: Parser = {
+        name: "test-parser",
+        parse: (_content: string) => [priorRecord, newRecord],
+      };
+
+      const adapter: Adapter = {
+        name: "test-adapter",
+        deliver: async (batch: Record[], _ctx: TargetConfig) => {
+          deliveredRecords.push(...batch);
+          resolveDeliveries();
+          return batch.map((_, i) => `mock-${i}`);
+        },
+        ready: async () => true,
+      };
+
+      // Pre-populate a file with content that produces both record types
+      const filePath = join(watchDir, "state-test.md");
+      await writeFile(
+        filePath,
+        "content that produces unchanged + new records",
+        "utf-8",
+      );
+
+      const runner = new Runner(config, parser, adapter, tracker, store);
+      await runner.start({ foreground: true });
+
+      // Wait for the initial file to be processed
+      await Promise.race([
+        allDeliveries,
+        new Promise<null>(
+          (_, reject) =>
+            setTimeout(
+              () =>
+                reject(
+                  new Error(
+                    "Timeout: delivery never happened for state-aware test",
+                  ),
+                ),
+              3000,
+            ),
+        ),
+      ]);
+
+      // Only the new record should be delivered (unchanged one filtered out)
+      expect(deliveredRecords).toHaveLength(1);
+      expect(deliveredRecords[0]).toEqual(newRecord);
+      expect(deliveredRecords).not.toContainEqual(priorRecord);
+
+      await runner.stop();
+    });
+
+    // ------------------------------------------------------------------
+    // Test 5: No delivery after stop()
+    // ------------------------------------------------------------------
+    it("does not process events after stop()", async () => {
+      const watchDir = join(tmpDir, "watch-after-stop");
+      await mkdir(watchDir, { recursive: true });
+      config = testConfig({ watchPath: watchDir });
+
+      let deliveredAfterStop = false;
+
+      const parser: Parser = {
+        name: "test-parser",
+        parse: () => [
+          RecordSchema.parse({
+            type: "revdiff",
+            file: "after-stop.md",
+            line: 1,
+            annotationType: "+",
+            comment: "should not be delivered",
+          }) as Record,
+        ],
+      };
+
+      const adapter: Adapter = {
+        name: "test-adapter",
+        deliver: async (batch: Record[], _ctx: TargetConfig) => {
+          deliveredAfterStop = true;
+          return batch.map((_, i) => `mock-${i}`);
+        },
+        ready: async () => true,
+      };
+
+      const runner = new Runner(config, parser, adapter, tracker, store);
+      await runner.start({ foreground: true });
+
+      // Stop the runner immediately
+      await runner.stop();
+
+      // Write a file after stop
+      const afterStopFile = join(watchDir, "after-stop.md");
+      await writeFile(afterStopFile, "content written after stop", "utf-8");
+
+      // Wait a bit to allow any errant watcher events to fire
+      await new Promise((r) => setTimeout(r, 1000));
+
+      // No delivery should have happened after stop
+      expect(deliveredAfterStop).toBe(false);
     });
   });
 });
