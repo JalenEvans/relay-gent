@@ -220,19 +220,19 @@ describe("command outputs", () => {
     expect(output).toContain("Target name required");
   });
 
-  it('stop prints "Not yet implemented"', async () => {
+  it('stop shows "No targets configured" by default', async () => {
     const output = await runWithArgs(["stop"]);
-    expect(output).toMatch(/not yet implemented|Not yet implemented/i);
+    expect(output).toContain("No targets configured");
   });
 
-  it('clean prints "Not yet implemented"', async () => {
+  it("clean shows --force hint by default", async () => {
     const output = await runWithArgs(["clean"]);
-    expect(output).toMatch(/not yet implemented|Not yet implemented/i);
+    expect(output).toContain("Use --force");
   });
 
-  it('log prints "Not yet implemented"', async () => {
+  it('log shows "No logs available" by default', async () => {
     const output = await runWithArgs(["log"]);
-    expect(output).toMatch(/not yet implemented|Not yet implemented/i);
+    expect(output).toContain("No logs available");
   });
 });
 

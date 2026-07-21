@@ -1,4 +1,7 @@
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
+import { readFile, readdir, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { Command, CommanderError } from "commander";
 import { RawCommandAdapter } from "./adapters";
 import { Runner } from "./application/runner";
@@ -15,10 +18,6 @@ import { StateStore } from "./state/store";
 // ============================================================
 // Helpers
 // ============================================================
-
-function notImplemented(): void {
-  process.stdout.write("Not yet implemented\n");
-}
 
 /** Look up a parser by name, falling back to a minimal no-op parser. */
 function resolveParser(name: string): Parser {
@@ -219,33 +218,145 @@ export function createCli(): Command {
     });
 
   // --------------------------------------------------
-  // stop (stub)
+  // stop
   // --------------------------------------------------
   program
     .command("stop")
     .description("Stop watcher(s)")
     .option("--target <name>", "Target agent name to stop")
     .option("--all", "Stop all watchers")
-    .action(notImplemented);
+    .action(async (options: { target?: string; all?: boolean }) => {
+      try {
+        const config = loadConfig();
+        const { target: targetName, all } = options;
+
+        if (targetName) {
+          const target = config.targets[targetName];
+          if (!target) {
+            process.stderr.write(`Target '${targetName}' not found in configuration\n`);
+            exitProgram(1);
+            return;
+          }
+          const runner = new (Runner as unknown as new (config: TargetConfig) => Runner)(target);
+          await runner.stop();
+          process.stdout.write(`Stopped target: ${targetName}\n`);
+        } else if (all) {
+          const names = Object.keys(config.targets);
+          if (names.length === 0) {
+            process.stderr.write("No targets configured\n");
+            exitProgram(1);
+            return;
+          }
+          for (const name of names) {
+            const target = config.targets[name];
+            const runner = new (Runner as unknown as new (config: TargetConfig) => Runner)(target);
+            await runner.stop();
+          }
+          process.stdout.write("Stopped all targets\n");
+        } else {
+          process.stderr.write("No targets configured\n");
+          exitProgram(1);
+        }
+        exitProgram(0);
+      } catch (error) {
+        if (error instanceof CommanderError) throw error;
+        process.stderr.write(`${String(error)}\n`);
+        exitProgram(1);
+      }
+    });
 
   // --------------------------------------------------
-  // clean (stub)
+  // clean
   // --------------------------------------------------
   program
     .command("clean")
     .description("Remove stale targets")
     .option("--force", "Force clean without confirmation")
-    .action(notImplemented);
+    .action((options: { force?: boolean }) => {
+      try {
+        if (!options.force) {
+          process.stdout.write("Use --force to remove stale state directories\n");
+          exitProgram(0);
+          return;
+        }
+
+        const config = loadConfig();
+        const names = Object.keys(config.targets);
+        if (names.length === 0) {
+          process.stderr.write("Nothing to clean\n");
+          exitProgram(1);
+          return;
+        }
+
+        const stateDir = join(homedir(), ".relay-gent", "state");
+        for (const name of names) {
+          const targetDir = join(stateDir, name);
+          rmSync(targetDir, { recursive: true, force: true });
+          process.stdout.write(`Cleaned state for target: ${name}\n`);
+        }
+        exitProgram(0);
+      } catch (error) {
+        if (error instanceof CommanderError) throw error;
+        process.stderr.write(`${String(error)}\n`);
+        exitProgram(1);
+      }
+    });
 
   // --------------------------------------------------
-  // log (stub)
+  // log
   // --------------------------------------------------
   program
     .command("log")
     .description("View/clear logs")
     .option("--target <name>", "Target agent name")
     .option("--clear", "Clear logs")
-    .action(notImplemented);
+    .action(async (options: { target?: string; clear?: boolean }) => {
+      try {
+        const { target: targetName, clear } = options;
+        const logDir = join(homedir(), ".relay-gent", "logs");
+
+        if (targetName) {
+          const logFile = join(logDir, `${targetName}.log`);
+
+          if (clear) {
+            await writeFile(logFile, "", "utf-8");
+            process.stdout.write(`Cleared logs for target: ${targetName}\n`);
+          } else {
+            try {
+              const content = await readFile(logFile, "utf-8");
+              process.stdout.write(content);
+            } catch {
+              const config = loadConfig();
+              if (!config.targets[targetName]) {
+                process.stderr.write(`Target '${targetName}' not found in configuration\n`);
+                exitProgram(1);
+                return;
+              }
+              process.stdout.write(`No logs found for target: ${targetName}\n`);
+            }
+          }
+        } else {
+          let files: string[];
+          try {
+            files = await readdir(logDir);
+          } catch {
+            files = [];
+          }
+          const logNames = files.filter((f) => f.endsWith(".log")).map((f) => f.slice(0, -4));
+          if (logNames.length === 0) {
+            process.stdout.write("No logs available\n");
+          } else {
+            process.stdout.write(`${logNames.join("\n")}\n`);
+          }
+        }
+
+        exitProgram(0);
+      } catch (error) {
+        if (error instanceof CommanderError) throw error;
+        process.stderr.write(`${String(error)}\n`);
+        exitProgram(1);
+      }
+    });
 
   return program;
 }
