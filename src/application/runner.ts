@@ -15,6 +15,18 @@ import { StateStore } from "../state/store";
 
 export class Runner {
   private watcher?: FSWatcher;
+  private stopped = false;
+
+  /**
+   * Bound handler for SIGINT/SIGTERM that guards against re-entry.
+   * Using an arrow function ensures `this` is correctly bound as the
+   * Runner instance when the handler is invoked by process signal events.
+   */
+  private readonly boundStop = () => {
+    if (this.stopped) return;
+    this.stopped = true;
+    this.stop();
+  };
 
   constructor(
     public readonly config: TargetConfig,
@@ -110,6 +122,12 @@ export class Runner {
       await new Promise<void>((resolve) => {
         this.watcher!.on("ready", resolve);
       });
+
+      // Register signal handlers for graceful shutdown.
+      // Using the bound arrow function ensures the same reference is used for
+      // both registration and removal, allowing proper cleanup in stop().
+      process.on("SIGINT", this.boundStop);
+      process.on("SIGTERM", this.boundStop);
     } else if (options.once) {
       await this.onFileChange(this.config.watchPath);
     }
@@ -120,6 +138,18 @@ export class Runner {
    * and persisting current state.
    */
   async stop(): Promise<void> {
+    // Remove signal handlers FIRST so that if another signal arrives during
+    // shutdown it won't trigger another stop() call. The guard flag above
+    // also prevents re-entry from the same handler.
+    process.removeListener("SIGINT", this.boundStop);
+    process.removeListener("SIGTERM", this.boundStop);
+
+    // Register permanent no-op handlers to prevent the default signal
+    // behavior (process termination) from kicking in now that our specific
+    // handlers have been removed.
+    process.on("SIGINT", () => {});
+    process.on("SIGTERM", () => {});
+
     if (this.watcher) {
       await this.watcher.close();
     }

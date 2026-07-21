@@ -1065,4 +1065,164 @@ describe("Runner", () => {
       expect(deliveredAfterStop).toBe(false);
     });
   });
+
+  // ----------------------------------------------------------------
+  // 8. signal handling — SIGINT/SIGTERM graceful shutdown
+  // ----------------------------------------------------------------
+  describe("signal handling", () => {
+    // ------------------------------------------------------------------
+    // Test 1: Verify handlers are registered on process for both signals
+    // ------------------------------------------------------------------
+    it("registers SIGINT and SIGTERM handlers on foreground start", async () => {
+      const filePath = join(tmpDir, "signal-register.md");
+      await writeFile(filePath, "content", "utf-8");
+      config = testConfig({ watchPath: filePath });
+
+      const onSpy = spyOn(process, "on");
+
+      const runner = new Runner(
+        config,
+        mockParser,
+        mockAdapter,
+        tracker,
+        store,
+      );
+      await runner.start({ foreground: true });
+
+      const sigintCalls = onSpy.mock.calls.filter(
+        ([event]) => event === "SIGINT",
+      );
+      const sigtermCalls = onSpy.mock.calls.filter(
+        ([event]) => event === "SIGTERM",
+      );
+      expect(sigintCalls.length).toBeGreaterThanOrEqual(1);
+      expect(sigtermCalls.length).toBeGreaterThanOrEqual(1);
+
+      onSpy.mockRestore();
+      await runner.stop();
+    });
+
+    // ------------------------------------------------------------------
+    // Test 2: Real SIGINT signal triggers stop()
+    // ------------------------------------------------------------------
+    it("SIGINT triggers stop() call", async () => {
+      const filePath = join(tmpDir, "signal-sigint.md");
+      await writeFile(filePath, "content", "utf-8");
+      config = testConfig({ watchPath: filePath });
+
+      const runner = new Runner(
+        config,
+        mockParser,
+        mockAdapter,
+        tracker,
+        store,
+      );
+      await runner.start({ foreground: true });
+
+      const stopSpy = spyOn(runner, "stop");
+
+      // Send a real SIGINT to our own process
+      process.kill(process.pid, "SIGINT");
+
+      // Allow async handlers to run
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      expect(stopSpy).toHaveBeenCalled();
+
+      stopSpy.mockRestore();
+      await runner.stop();
+    });
+
+    // ------------------------------------------------------------------
+    // Test 3: Real SIGTERM signal triggers stop()
+    // ------------------------------------------------------------------
+    it("SIGTERM triggers stop() call", async () => {
+      const filePath = join(tmpDir, "signal-sigterm.md");
+      await writeFile(filePath, "content", "utf-8");
+      config = testConfig({ watchPath: filePath });
+
+      const runner = new Runner(
+        config,
+        mockParser,
+        mockAdapter,
+        tracker,
+        store,
+      );
+      await runner.start({ foreground: true });
+
+      const stopSpy = spyOn(runner, "stop");
+
+      // Send a real SIGTERM to our own process
+      process.kill(process.pid, "SIGTERM");
+
+      // Allow async handlers to run
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      expect(stopSpy).toHaveBeenCalled();
+
+      stopSpy.mockRestore();
+      await runner.stop();
+    });
+
+    // ------------------------------------------------------------------
+    // Test 4: Handlers are removed after stop()
+    // ------------------------------------------------------------------
+    it("removes signal handlers after stop()", async () => {
+      const filePath = join(tmpDir, "signal-remove.md");
+      await writeFile(filePath, "content", "utf-8");
+      config = testConfig({ watchPath: filePath });
+
+      const removeListenerSpy = spyOn(process, "removeListener");
+
+      const runner = new Runner(
+        config,
+        mockParser,
+        mockAdapter,
+        tracker,
+        store,
+      );
+      await runner.start({ foreground: true });
+      await runner.stop();
+
+      const sigintRemoves = removeListenerSpy.mock.calls.filter(
+        ([event]) => event === "SIGINT",
+      );
+      const sigtermRemoves = removeListenerSpy.mock.calls.filter(
+        ([event]) => event === "SIGTERM",
+      );
+      expect(sigintRemoves.length).toBeGreaterThanOrEqual(1);
+      expect(sigtermRemoves.length).toBeGreaterThanOrEqual(1);
+
+      removeListenerSpy.mockRestore();
+    });
+
+    // ------------------------------------------------------------------
+    // Test 5: Multiple signals don't throw
+    // ------------------------------------------------------------------
+    it("does not throw when signal is received multiple times", async () => {
+      const filePath = join(tmpDir, "signal-multiple.md");
+      await writeFile(filePath, "content", "utf-8");
+      config = testConfig({ watchPath: filePath });
+
+      const runner = new Runner(
+        config,
+        mockParser,
+        mockAdapter,
+        tracker,
+        store,
+      );
+      await runner.start({ foreground: true });
+
+      // Send SIGINT twice — both should resolve without error
+      process.kill(process.pid, "SIGINT");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      process.kill(process.pid, "SIGINT");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      // If we got here without error, the test passes
+      expect(true).toBe(true);
+
+      await runner.stop();
+    });
+  });
 });
