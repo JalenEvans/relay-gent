@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "bun:t
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import * as os from "node:os";
 import { createCli } from "../../src/cli";
 
 // Import real modules for vi.spyOn-based mocking, which is scoped to this
@@ -10,15 +11,11 @@ import * as configLoader from "../../src/config/loader";
 import * as runnerModule from "../../src/application/runner";
 
 // ============================================================
-// Phase 3 — Status Dashboard & Core Commands
+// Tests for the CLI core commands — updated after review to assert correct behavior
 // ============================================================
 // These tests validate the command-layer behaviour of the
-// `status`, `watch`, and `once` commands that Phase 3 is
-// expected to implement.
-//
-// The tests should FAIL against the current stubs because
-// they assert behaviour the stubs don't provide (target
-// display, file validation, exit codes, error messages).
+// `status`, `watch`, and `once` commands that implement
+// the core workflow.
 //
 // Mocks are provided for loadConfig and Runner so that
 // the command-layer logic can be tested without disk I/O
@@ -91,23 +88,21 @@ async function runWithArgs(
   const origStdout = process.stdout.write.bind(process.stdout);
   const origStderr = process.stderr.write.bind(process.stderr);
 
-  // @ts-expect-error — mocking stdout.write for test capture
-  process.stdout.write = (chunk: string, ..._rest: unknown[]) => {
+  process.stdout.write = ((chunk: string, ..._rest: unknown[]) => {
     stdoutChunks.push(String(chunk));
     return true;
-  };
+  }) as typeof process.stdout.write;
 
-  // @ts-expect-error — mocking stderr.write for test capture
-  process.stderr.write = (chunk: string, ..._rest: unknown[]) => {
+  process.stderr.write = ((chunk: string, ..._rest: unknown[]) => {
     stderrChunks.push(String(chunk));
     return true;
-  };
+  }) as typeof process.stderr.write;
 
   // Prevent handlers from calling process.exit() directly
   const exitSpy = vi.spyOn(process, "exit").mockImplementation(
-    (_code?: number) => {
+    ((_code?: number) => {
       // Capture exit code without terminating
-    },
+    }) as unknown as (code?: string | number | null | undefined) => never,
   );
 
   cli.exitOverride();
@@ -130,7 +125,7 @@ async function runWithArgs(
     // If process.exit was called directly (not via Commander),
     // the spy captured the exit code
     if (exitCode === null && exitSpy.mock.calls.length > 0) {
-      exitCode = exitSpy.mock.calls[0][0] ?? 0;
+      exitCode = (exitSpy.mock.calls[0][0] as number) ?? 0;
     }
 
     exitSpy.mockRestore();
@@ -150,6 +145,7 @@ async function runWithArgs(
 describe("status command", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(os, "homedir").mockReturnValue("/tmp/relay-gent-test-home");
     loadConfigSpy = vi.spyOn(configLoader, "loadConfig");
   });
 
@@ -170,6 +166,9 @@ describe("status command", () => {
 
     // The status output should mention the configured target name
     expect(stdout).toContain("web");
+
+    // Should display as a table row or show status indicator
+    expect(stdout).toMatch(/ \||idle/);
 
     // Should exit successfully
     expect(exitCode).toBe(0);
@@ -197,7 +196,8 @@ describe("watch command", () => {
     loadConfigSpy = vi.spyOn(configLoader, "loadConfig");
     runnerSpy = vi
       .spyOn(runnerModule, "Runner")
-      .mockImplementation(() => mockRunnerInstance as unknown as typeof runnerModule.Runner);
+      // @ts-expect-error — mock constructor for testing
+      .mockImplementation(() => mockRunnerInstance);
   });
 
   it("shows error and exits with code 1 when target is not found", async () => {
@@ -267,7 +267,8 @@ describe("once command", () => {
     loadConfigSpy = vi.spyOn(configLoader, "loadConfig");
     runnerSpy = vi
       .spyOn(runnerModule, "Runner")
-      .mockImplementation(() => mockRunnerInstance as unknown as typeof runnerModule.Runner);
+      // @ts-expect-error — mock constructor for testing
+      .mockImplementation(() => mockRunnerInstance);
     tmpDir = await mkdtemp(join(tmpdir(), "relay-gent-once-"));
     tmpFile = join(tmpDir, "test-file.md");
     await writeFile(tmpFile, "test content", "utf-8");
@@ -319,6 +320,10 @@ describe("once command", () => {
     expect(runnerSpy).toHaveBeenCalledTimes(1);
     expect(runnerSpy).toHaveBeenCalledWith(
       expect.objectContaining({ adapter: "opencode" }),
+      expect.anything(), // parser
+      expect.anything(), // adapter
+      expect.anything(), // delta
+      expect.anything(), // store
     );
 
     // Runner.start should have been called with once:true
@@ -342,6 +347,31 @@ describe("once command", () => {
       "web",
     ]);
 
+    expect(runnerSpy).not.toHaveBeenCalled();
+  });
+
+  it("outputs error for unknown parser and does not create Runner", async () => {
+    loadConfigSpy.mockReturnValue(
+      baseConfig({
+        web: {
+          adapter: "opencode",
+          watchPath: "./src",
+          parser: "nonexistent-parser",
+        },
+      }),
+    );
+    const { stderr, exitCode } = await runWithArgs([
+      "once",
+      tmpFile,
+      "--target",
+      "web",
+    ]);
+
+    // Should output parser-not-found error
+    expect(stderr).toMatch(/parser|not found/i);
+    expect(exitCode).toBe(1);
+
+    // Runner should NOT be created for invalid parser
     expect(runnerSpy).not.toHaveBeenCalled();
   });
 });

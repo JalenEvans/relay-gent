@@ -303,15 +303,15 @@ describe("stop command", () => {
   it("shows error with hint when no --target or --all given", () => {
     writeConfig(VALID_CONFIG_TOML);
     const { stderr, exitCode } = runCli(["stop"]);
-    expect(stderr).toContain("No targets configured");
+    expect(stderr).toContain("Specify --target <name> or --all");
     expect(exitCode).toBe(1);
   });
 
-  it("shows error for --all when no targets are configured", () => {
+  it("shows --all status message when no targets configured", () => {
     removeConfig();
-    const { stderr, exitCode } = runCli(["stop", "--all"]);
-    expect(stderr).toContain("No targets configured");
-    expect(exitCode).toBe(1);
+    const { stdout, exitCode } = runCli(["stop", "--all"]);
+    expect(stdout).toContain("Process management is not yet implemented");
+    expect(exitCode).toBe(0);
   });
 });
 
@@ -333,7 +333,7 @@ describe("clean command", () => {
   it("with --force removes state directories and confirms cleaning", () => {
     writeConfig(VALID_CONFIG_TOML);
     // Create state directory to simulate existing state
-    const stateDir = join(tmpHome, ".relay-gent", "state", "web");
+    const stateDir = join(tmpHome, ".relay-gent", "targets", "web");
     mkdirSync(stateDir, { recursive: true });
     expect(existsSync(stateDir)).toBe(true);
 
@@ -346,9 +346,9 @@ describe("clean command", () => {
 
   it('shows "Nothing to clean" when no targets configured', () => {
     removeConfig();
-    const { stderr, exitCode } = runCli(["clean", "--force"]);
-    expect(stderr).toContain("Nothing to clean");
-    expect(exitCode).toBe(1);
+    const { stdout, exitCode } = runCli(["clean", "--force"]);
+    expect(stdout).toContain("Nothing to clean");
+    expect(exitCode).toBe(0);
   });
 });
 

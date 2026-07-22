@@ -1,5 +1,6 @@
-import { beforeAll, describe, expect, it } from "bun:test";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import type { Command } from "commander";
+import * as os from "node:os";
 
 // Dynamic import with cache-busting to avoid module-state leakage
 // from other test files (e.g. cli.core.test.ts) that may have
@@ -15,11 +16,7 @@ beforeAll(async () => {
 });
 
 // ============================================================
-// CLI Foundation — Phase 1
-// ============================================================
-// Tests the Commander-based CLI definition exported from
-// src/cli.ts. All commands are stubs that print
-// "Not yet implemented".
+// Tests for the CLI core commands — updated after review to assert correct behavior
 // ============================================================
 
 // ------------------------------------------------------------------
@@ -37,16 +34,14 @@ async function runWithArgs(args: string[]): Promise<string> {
 
   const origWrite = process.stdout.write.bind(process.stdout);
   const origErrWrite = process.stderr.write.bind(process.stderr);
-  // @ts-expect-error - mocking stdout.write for test capture
-  process.stdout.write = (chunk: string, ..._rest: unknown[]) => {
+  process.stdout.write = ((chunk: string, ..._rest: unknown[]) => {
     chunks.push(String(chunk));
     return true;
-  };
-  // @ts-expect-error - mocking stderr.write for test capture
-  process.stderr.write = (chunk: string, ..._rest: unknown[]) => {
+  }) as typeof process.stdout.write;
+  process.stderr.write = ((chunk: string, ..._rest: unknown[]) => {
     errChunks.push(String(chunk));
     return true;
-  };
+  }) as typeof process.stderr.write;
 
   cli.exitOverride();
 
@@ -79,7 +74,7 @@ function getCommand(name: string): Command {
 }
 
 /** Returns the long option names for a command. */
-function optionNames(cmd: Command): string[] {
+function optionNames(cmd: Command): (string | undefined)[] {
   return cmd.options.map((opt) => opt.long);
 }
 
@@ -142,6 +137,10 @@ describe("registered commands", () => {
 // ============================================================
 
 describe("default command", () => {
+  beforeEach(() => {
+    vi.spyOn(os, "homedir").mockReturnValue("/tmp/relay-gent-test-home");
+  });
+
   it("has the status command configured as the default", () => {
     const cli = createCli();
     const defaultCmd = cli.commands.find(

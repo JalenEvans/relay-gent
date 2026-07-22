@@ -206,6 +206,34 @@ describe("loadConfig", () => {
 
       expect(config.defaults.debounceMs).toBe(500);
     });
+
+    it("RELAY_GENT_DEFAULTS_DEBOUNCE_MS=abc throws descriptive error", () => {
+      expect(() =>
+        loadConfig({
+          configPath: join(tmpDir, "nonexistent.toml"),
+          envOverrides: { RELAY_GENT_DEFAULTS_DEBOUNCE_MS: "abc" },
+        }),
+      ).toThrow(/RELAY_GENT/);
+    });
+
+    it("RELAY_GENT_TARGET_WEB_DEBOUNCE_MS=xyz throws descriptive error", () => {
+      expect(() =>
+        loadConfig({
+          configPath: join(tmpDir, "nonexistent.toml"),
+          envOverrides: { RELAY_GENT_TARGET_WEB_DEBOUNCE_MS: "xyz" },
+        }),
+      ).toThrow(/RELAY_GENT/);
+    });
+
+    it("RELAY_GENT_TARGET_MY_APP_WATCH_PATH=/x maps to target my_app.watchPath", () => {
+      const config = loadConfig({
+        configPath: join(tmpDir, "nonexistent.toml"),
+        envOverrides: { RELAY_GENT_TARGET_MY_APP_WATCH_PATH: "/x" },
+      });
+
+      expect(config.targets.my_app).toBeDefined();
+      expect(config.targets.my_app.watchPath).toBe("/x");
+    });
   });
 
   // ----------------------------------------------------------------
@@ -243,6 +271,27 @@ describe("loadConfig", () => {
       expect(config.defaults.retryBackoffMs).toBe(1000);
       expect(config.targets.web).toBeDefined();
       expect(config.targets.api).toBeDefined();
+    });
+
+    it("CLI overrides can override target watchPath", () => {
+      const configPath = join(tmpDir, "nonexistent.toml");
+
+      const config = loadConfig({
+        configPath,
+        cliOverrides: {
+          targets: {
+            web: {
+              adapter: "opencode",
+              watchPath: "/custom",
+              parser: "ts",
+              server_url: "http://localhost:4096",
+            },
+          },
+        },
+      });
+
+      expect(config.targets.web).toBeDefined();
+      expect(config.targets.web.watchPath).toBe("/custom");
     });
   });
 
