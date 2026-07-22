@@ -64,3 +64,42 @@ bun test --watch
 Tests use:
 - `bun:test` — describe/it/expect
 - `fast-check` — property-based testing for invariants
+
+## Running the CLI
+
+The `relay-gent` binary runs via the bin entry in `package.json` or directly with Bun:
+
+```bash
+# Run directly during development
+bun run bin/relay-gent.ts <command> [options]
+
+# Or if installed globally
+relay-gent <command> [options]
+```
+
+### Configuration
+
+Configuration is auto-loaded from `~/.relay-gent/config.toml`. Environment variables prefixed with `RELAY_GENT_` may override config file values. See the [Environment Variables Reference](../reference/environment-variables.md) for details.
+
+CLI flags take the highest precedence: **CLI flags > Environment variables > Config file > Schema defaults**.
+
+### Quick Examples
+
+```bash
+# Show status dashboard (default command)
+relay-gent status
+
+# One-shot parse and deliver
+relay-gent once ./data.ndjson --target my-target
+
+# Watch a file for changes (foreground)
+relay-gent watch ./data.ndjson --target my-target
+
+# View logs for a target
+relay-gent log --target my-target
+
+# Clean stale state directories
+relay-gent clean --force
+```
+
+For a complete command reference, see [CLI Usage Reference](cli-usage.md).

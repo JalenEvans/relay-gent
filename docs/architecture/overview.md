@@ -75,6 +75,27 @@ This ensures runtime validation matches compile-time types exactly.
 | Barrel re-exports (`index.ts`) | Clean public API surface; domain layer decoupled from implementations |
 | Stub in domain, real impl via barrel | Domain ships a no-op parser; concrete implementations overwrite it at registration time |
 
+### Configuration Loading
+
+Before any pipeline runs, configuration is loaded and validated:
+
+```mermaid
+graph LR
+    TOML[~/.relay-gent/config.toml] --> M[Merge]
+    ENV[RELAY_GENT_* vars] --> M
+    CLI[CLI flags] --> M
+    M --> V[Zod Validation]
+    V --> C[Config object]
+```
+
+The `loadConfig()` function in `src/config/loader.ts` implements a three-tier merge: TOML file (lowest priority), environment variables (middle), and CLI overrides (highest). The result is validated against `ConfigSchema`.
+
+## CLI Architecture
+
+The CLI is implemented in `src/cli.ts` using the Commander library. The `createCli()` function configures 6 commands (`status`, `watch`, `once`, `stop`, `clean`, `log`) and is invoked from `bin/relay-gent.ts` via `parseAsync()`. Exit codes follow Unix conventions: 0 for success, 1 for any error.
+
+The `Runner` class in `src/application/runner.ts` serves as the orchestration engine, wiring together parsers, the delta tracker, adapters, and the state store into a cohesive pipeline for the `watch` and `once` commands.
+
 ## Error Handling
 
 Two domain-specific error types:
