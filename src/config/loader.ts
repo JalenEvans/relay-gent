@@ -41,6 +41,17 @@ export function loadConfig(options?: LoadConfigOptions): Config {
     config.targets = {};
   }
 
+  // 4b. Apply defaults to any target that lacks required fields
+  const defaultAdapter = (config.defaultAdapter as string) ?? "opencode";
+  for (const target of Object.values(config.targets as Record<string, Record<string, unknown>>)) {
+    if (!target.adapter) {
+      target.adapter = defaultAdapter;
+    }
+    if (!target.parser) {
+      target.parser = "json-lines";
+    }
+  }
+
   // 5. Validate with schema — applies schema defaults for missing fields
   return ConfigSchema.parse(config);
 }
@@ -63,7 +74,21 @@ function getEnvValue(key: string, envOverrides: Record<string, string>): string 
   return val !== undefined && val !== "" ? val : undefined;
 }
 
-const TARGET_ENV_RE = /^RELAY_GENT_TARGET_([A-Z][A-Z0-9]*)_(.+)$/;
+const TARGET_FIELDS = [
+  "ADAPTER",
+  "WATCH_PATH",
+  "PARSER",
+  "DEBOUNCE_MS",
+  "COMMAND",
+  "SHELL",
+  "SESSION_ID",
+  "SERVER_URL",
+];
+
+// Sort by length descending so the regex matches the LONGEST suffix first
+const TARGET_ENV_RE = new RegExp(
+  `^RELAY_GENT_TARGET_([A-Z][A-Z0-9_]*)_(${TARGET_FIELDS.sort((a, b) => b.length - a.length).join("|")})$`,
+);
 
 const TARGET_FIELD_MAP: Record<string, string> = {
   ADAPTER: "adapter",
@@ -75,6 +100,18 @@ const TARGET_FIELD_MAP: Record<string, string> = {
   SESSION_ID: "session_id",
   SERVER_URL: "server_url",
 };
+
+/**
+ * Parse a numeric string from an environment variable.
+ * Throws a descriptive error if the value is not a valid number.
+ */
+function parseNumericEnv(raw: string, varName: string): number {
+  const val = Number(raw);
+  if (Number.isNaN(val)) {
+    throw new Error(`Environment variable ${varName} must be a number, got "${raw}"`);
+  }
+  return val;
+}
 
 /** Build a partial config object from env-var overrides. */
 function buildEnvConfig(envOverrides: Record<string, string>): Record<string, unknown> {
@@ -93,9 +130,15 @@ function buildEnvConfig(envOverrides: Record<string, string>): Record<string, un
 
   if (debounceMs !== undefined || maxRetries !== undefined || retryBackoffMs !== undefined) {
     const defaults: Record<string, unknown> = {};
-    if (debounceMs !== undefined) defaults.debounceMs = Number(debounceMs);
-    if (maxRetries !== undefined) defaults.maxRetries = Number(maxRetries);
-    if (retryBackoffMs !== undefined) defaults.retryBackoffMs = Number(retryBackoffMs);
+    if (debounceMs !== undefined)
+      defaults.debounceMs = parseNumericEnv(debounceMs, "RELAY_GENT_DEFAULTS_DEBOUNCE_MS");
+    if (maxRetries !== undefined)
+      defaults.maxRetries = parseNumericEnv(maxRetries, "RELAY_GENT_DEFAULTS_MAX_RETRIES");
+    if (retryBackoffMs !== undefined)
+      defaults.retryBackoffMs = parseNumericEnv(
+        retryBackoffMs,
+        "RELAY_GENT_DEFAULTS_RETRY_BACKOFF_MS",
+      );
     result.defaults = defaults;
   }
 
@@ -150,7 +193,7 @@ function applyTargetOverride(
   }
 
   if (field === "debounceMs") {
-    targets[name][field] = Number(val);
+    targets[name][field] = parseNumericEnv(val, key);
   } else if (field === "shell") {
     targets[name][field] = val === "true";
   } else {

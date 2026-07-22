@@ -11,7 +11,7 @@ import type { Adapter, DeliveredId } from "./domain/adapter/adapter.interface";
 import type { TargetConfig } from "./domain/config/config.schema";
 import type { Parser } from "./domain/parser/parser.interface";
 import { computeIdentity } from "./domain/record/record-identity";
-import type { Record } from "./domain/record/record.schema";
+import type { Record as RelayRecord } from "./domain/record/record.schema";
 import { registry } from "./parsers";
 import { StateStore } from "./state/store";
 
@@ -19,13 +19,9 @@ import { StateStore } from "./state/store";
 // Helpers
 // ============================================================
 
-/** Look up a parser by name, falling back to a minimal no-op parser. */
+/** Look up a parser by name, throwing if not found. */
 function resolveParser(name: string): Parser {
-  try {
-    return registry.getParser(name);
-  } catch {
-    return { name, parse: () => [] };
-  }
+  return registry.getParser(name);
 }
 
 /** Create an adapter for the given adapter name. */
@@ -38,7 +34,7 @@ function resolveAdapter(name: string): Adapter | undefined {
     case "claude":
       return {
         name,
-        async deliver(batch: Record[], _ctx: TargetConfig): Promise<DeliveredId[]> {
+        async deliver(batch: RelayRecord[], _ctx: TargetConfig): Promise<DeliveredId[]> {
           return batch.map((r) => computeIdentity(r));
         },
       };
@@ -56,20 +52,22 @@ function displayStatus(config: { targets: Record<string, TargetConfig> }): void 
   }
 
   const lines: string[] = [];
-  const h = "Target             Adapter            Watch Path          Status";
+  const h = "Target                | Adapter             | Watch Path            | Status";
   lines.push(h);
   lines.push("─".repeat(h.length));
 
   for (const name of names.sort()) {
     const t = config.targets[name];
-    lines.push(`${name.padEnd(18)}${t.adapter.padEnd(18)}${t.watchPath.padEnd(18)}idle`);
+    lines.push(`${name.padEnd(20)} | ${t.adapter.padEnd(18)} | ${t.watchPath.padEnd(20)} | idle`);
   }
 
   process.stdout.write(`${lines.join("\n")}\n`);
 }
 
-/** Signal the process to exit with the given code via CommanderError. */
+/** Signal the process to exit with the given code. */
 function exitProgram(code: number, message?: string): never {
+  process.exitCode = code;
+  if (message) process.stderr.write(`${message}\n`);
   throw new CommanderError(code, "commander.executeSubCommandAsync", message ?? "");
 }
 
@@ -120,6 +118,13 @@ export function createCli(): Command {
           return;
         }
 
+        const TARGET_NAME_RE = /^[a-z0-9][a-z0-9_-]*$/;
+        if (!TARGET_NAME_RE.test(targetName)) {
+          process.stderr.write(`Invalid target name: ${targetName}\n`);
+          exitProgram(1);
+          return;
+        }
+
         if (!existsSync(file)) {
           process.stderr.write(`File not found: ${file}\n`);
           exitProgram(1);
@@ -134,13 +139,10 @@ export function createCli(): Command {
           return;
         }
 
-        const parser = resolveParser(target.parser);
-        if (!parser) {
-          process.stderr.write(`Parser '${target.parser}' not found\n`);
-          exitProgram(1);
-          return;
-        }
+        // CLI file arg overrides config's watchPath
+        target.watchPath = file;
 
+        const parser = resolveParser(target.parser);
         const adapter = resolveAdapter(target.adapter);
         if (!adapter) {
           process.stderr.write(`Adapter '${target.adapter}' not found\n`);
@@ -150,9 +152,9 @@ export function createCli(): Command {
 
         const store = new StateStore(targetName);
         const delta = new DeltaTracker(store);
-        const runner = new (Runner as unknown as new (config: TargetConfig) => Runner)(target);
+        const runner = new Runner(target, parser, adapter, delta, store);
         await runner.start({ foreground: true });
-        exitProgram(0);
+        // Watcher keeps the event loop alive — do not exitProgram here
       } catch (error) {
         if (error instanceof CommanderError) throw error;
         process.stderr.write(`${String(error)}\n`);
@@ -177,6 +179,13 @@ export function createCli(): Command {
           return;
         }
 
+        const TARGET_NAME_RE = /^[a-z0-9][a-z0-9_-]*$/;
+        if (!TARGET_NAME_RE.test(targetName)) {
+          process.stderr.write(`Invalid target name: ${targetName}\n`);
+          exitProgram(1);
+          return;
+        }
+
         if (!existsSync(file)) {
           process.stderr.write(`File not found: ${file}\n`);
           exitProgram(1);
@@ -191,13 +200,10 @@ export function createCli(): Command {
           return;
         }
 
-        const parser = resolveParser(target.parser);
-        if (!parser) {
-          process.stderr.write(`Parser '${target.parser}' not found\n`);
-          exitProgram(1);
-          return;
-        }
+        // CLI file arg overrides config's watchPath
+        target.watchPath = file;
 
+        const parser = resolveParser(target.parser);
         const adapter = resolveAdapter(target.adapter);
         if (!adapter) {
           process.stderr.write(`Adapter '${target.adapter}' not found\n`);
@@ -207,7 +213,7 @@ export function createCli(): Command {
 
         const store = new StateStore(targetName);
         const delta = new DeltaTracker(store);
-        const runner = new (Runner as unknown as new (config: TargetConfig) => Runner)(target);
+        const runner = new Runner(target, parser, adapter, delta, store);
         await runner.start({ once: true });
         exitProgram(0);
       } catch (error) {
@@ -227,8 +233,18 @@ export function createCli(): Command {
     .option("--all", "Stop all watchers")
     .action(async (options: { target?: string; all?: boolean }) => {
       try {
-        const config = loadConfig();
         const { target: targetName, all } = options;
+
+        if (targetName) {
+          const TARGET_NAME_RE = /^[a-z0-9][a-z0-9_-]*$/;
+          if (!TARGET_NAME_RE.test(targetName)) {
+            process.stderr.write(`Invalid target name: ${targetName}\n`);
+            exitProgram(1);
+            return;
+          }
+        }
+
+        const config = loadConfig();
 
         if (targetName) {
           const target = config.targets[targetName];
@@ -237,27 +253,22 @@ export function createCli(): Command {
             exitProgram(1);
             return;
           }
-          const runner = new (Runner as unknown as new (config: TargetConfig) => Runner)(target);
-          await runner.stop();
-          process.stdout.write(`Stopped target: ${targetName}\n`);
-        } else if (all) {
+        }
+
+        if (targetName || all) {
+          process.stdout.write(
+            "Process management is not yet implemented — coming in the Process epic\n",
+          );
+          exitProgram(0);
+        } else {
           const names = Object.keys(config.targets);
           if (names.length === 0) {
             process.stderr.write("No targets configured\n");
-            exitProgram(1);
-            return;
+          } else {
+            process.stderr.write("Specify --target <name> or --all\n");
           }
-          for (const name of names) {
-            const target = config.targets[name];
-            const runner = new (Runner as unknown as new (config: TargetConfig) => Runner)(target);
-            await runner.stop();
-          }
-          process.stdout.write("Stopped all targets\n");
-        } else {
-          process.stderr.write("No targets configured\n");
           exitProgram(1);
         }
-        exitProgram(0);
       } catch (error) {
         if (error instanceof CommanderError) throw error;
         process.stderr.write(`${String(error)}\n`);
@@ -283,14 +294,14 @@ export function createCli(): Command {
         const config = loadConfig();
         const names = Object.keys(config.targets);
         if (names.length === 0) {
-          process.stderr.write("Nothing to clean\n");
-          exitProgram(1);
+          process.stdout.write("Nothing to clean\n");
+          exitProgram(0);
           return;
         }
 
-        const stateDir = join(homedir(), ".relay-gent", "state");
+        const stateBase = join(homedir(), ".relay-gent", "targets");
         for (const name of names) {
-          const targetDir = join(stateDir, name);
+          const targetDir = join(stateBase, name);
           rmSync(targetDir, { recursive: true, force: true });
           process.stdout.write(`Cleaned state for target: ${name}\n`);
         }
@@ -313,6 +324,16 @@ export function createCli(): Command {
     .action(async (options: { target?: string; clear?: boolean }) => {
       try {
         const { target: targetName, clear } = options;
+
+        if (targetName) {
+          const TARGET_NAME_RE = /^[a-z0-9][a-z0-9_-]*$/;
+          if (!TARGET_NAME_RE.test(targetName)) {
+            process.stderr.write(`Invalid target name: ${targetName}\n`);
+            exitProgram(1);
+            return;
+          }
+        }
+
         const logDir = join(homedir(), ".relay-gent", "logs");
 
         if (targetName) {
