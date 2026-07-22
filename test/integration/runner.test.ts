@@ -356,7 +356,7 @@ describe("Runner integration — full pipeline with real components", () => {
       const parser = createJsonLinesParser();
       const adapter = new RawCommandAdapter();
 
-      const errorSpy = spyOn(console, "error");
+      const errorSpy = spyOn(console, "error").mockImplementation(() => {});
 
       const runner = new Runner(config, parser, adapter, tracker, store);
 
