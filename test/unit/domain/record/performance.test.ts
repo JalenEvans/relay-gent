@@ -44,7 +44,7 @@ describe("Performance", () => {
     const elapsed = performance.now() - start;
 
     console.log(`  10,000 record validations: ${elapsed.toFixed(2)}ms`);
-    expect(elapsed).toBeLessThan(300);
+    expect(elapsed).toBeLessThan(100);
   });
 
   it("10,000 body normalizations complete in <100ms", () => {
