@@ -10,18 +10,40 @@ relay-gent sits between your file system and AI coding agents. It watches files,
 File System --> Watcher --> Parser --> Record[] --> Adapter --> Agent
 ```
 
-## Quick Start
+## Installation
+
+### Prerequisites
+
+- [Bun](https://bun.sh/) v1.0+ — relay-gent is built with Bun and requires it at runtime
+
+### From Source (bun link)
 
 ```bash
-# Install
+git clone https://github.com/JalenEvans/relay-gent
+cd relay-gent
 bun install
-
-# Run tests
-bun test
-
-# Typecheck + build
-bun run build
+bun link
 ```
+
+After `bun link`, the `relay-gent` command is available globally on your system. Run `relay-gent status` to verify.
+
+### From npm (when published)
+
+```bash
+npm install -g relay-gent
+# or
+bun install -g relay-gent
+```
+
+> **Note:** relay-gent has not yet been published to npm. Track [issue #XX](https://github.com/JalenEvans/relay-gent) for availability.
+
+### Verify Installation
+
+```bash
+relay-gent status
+```
+
+If successful, you'll see the status dashboard with your configured targets.
 
 ## Usage Examples
 

@@ -3,16 +3,39 @@
   "version": "0.1.0",
   "description": "A CLI tool designed to watch a file its changes and relay the delta of those changes to a coding agent.",
   "type": "module",
-  "main": "src/index.ts",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "bin": {
-    "relay-gent": "./bin/relay-gent.ts"
+    "relay-gent": "./dist/cli.js"
   },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "test": "bun test",
     "check": "biome check src/",
     "check:fix": "biome check --write src/",
     "format": "biome format --write src/",
-    "build": "bunx tsc --noEmit && bun build ./src/index.ts --outdir ./dist --target bun"
+    "build": "bunx tsc --noEmit && bun build ./src/index.ts --outdir ./dist --target bun && bun build ./bin/relay-gent.ts --outfile ./dist/cli.js --target bun",
+    "prepublishOnly": "bun run build"
+  },
+  "license": "MIT",
+  "author": "Jalen Evans",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JalenEvans/relay-gent.git"
+  },
+  "homepage": "https://github.com/JalenEvans/relay-gent#readme",
+  "bugs": {
+    "url": "https://github.com/JalenEvans/relay-gent/issues"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.0",
