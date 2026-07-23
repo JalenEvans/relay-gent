@@ -54,6 +54,27 @@ export class ProcessManager {
     await rm(join(this.baseDir, name), { recursive: true, force: true });
   }
 
+  /**
+   * Stop all running targets.
+   * Iterates status, stops each running target, returns names of stopped targets.
+   * Handles errors gracefully — won't crash if a single target fails to stop.
+   */
+  async stopAll(): Promise<string[]> {
+    const statuses = await this.status();
+    const stopped: string[] = [];
+    for (const s of statuses) {
+      if (s.state === "running") {
+        try {
+          await this.stop(s.name);
+          stopped.push(s.name);
+        } catch {
+          // Skip targets that error during stop
+        }
+      }
+    }
+    return stopped;
+  }
+
   async status(): Promise<TargetStatus[]> {
     const results: TargetStatus[] = [];
 

@@ -104,8 +104,22 @@ export async function run(targetName: string): Promise<void> {
   // 6. Register SIGTERM handler for graceful shutdown
   process.on("SIGTERM", async () => {
     logMessage(targetName, "received SIGTERM, shutting down gracefully");
-    await runner.stop();
-    process.exit(0);
+
+    // Force exit if graceful shutdown takes too long
+    const forceExit = setTimeout(() => {
+      process.exit(1);
+    }, 5000);
+
+    try {
+      await runner.stop();
+      clearTimeout(forceExit);
+      logMessage(targetName, "shutdown complete");
+      process.exit(0);
+    } catch (err) {
+      clearTimeout(forceExit);
+      logMessage(targetName, `shutdown error: ${err}`, "ERROR");
+      process.exit(1);
+    }
   });
 
   // 7. Start runner in foreground mode
