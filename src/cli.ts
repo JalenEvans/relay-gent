@@ -110,7 +110,8 @@ export function createCli(): Command {
     .description("Start watching")
     .argument("<file>", "File to watch")
     .option("--target <name>", "Target agent name")
-    .action(async (file: string, options: { target?: string }) => {
+    .option("--background", "Run watcher in background (daemonize)")
+    .action(async (file: string, options: { target?: string; background?: boolean }) => {
       try {
         const targetName = options.target;
         if (!targetName) {
@@ -148,6 +149,14 @@ export function createCli(): Command {
         if (!adapter) {
           process.stderr.write(`Adapter '${target.adapter}' not found\n`);
           exitProgram(1);
+          return;
+        }
+
+        if (options.background) {
+          const pm = new ProcessManager(join(homedir(), ".relay-gent", "targets"));
+          await pm.start(targetName);
+          process.stdout.write(`Watcher started in background for target: ${targetName}\n`);
+          exitProgram(0);
           return;
         }
 
