@@ -16,16 +16,37 @@ File System --> Watcher --> Parser --> Record[] --> Adapter --> Agent
 
 - [Bun](https://bun.sh/) v1.0+ — relay-gent is built with Bun and requires it at runtime
 
-### From Source (bun link)
+### From Source
 
 ```bash
 git clone https://github.com/JalenEvans/relay-gent
 cd relay-gent
 bun install
-bun link
+npm link
 ```
 
-After `bun link`, the `relay-gent` command is available globally on your system. Run `relay-gent status` to verify.
+After `npm link`, the `relay-gent` command is available globally on your system (npm registers bin entries in its global prefix directory). Run `relay-gent status` to verify.
+
+> **Note:** `bun link` is not used here — Bun's `link` command is for library development (linking packages into other projects' `node_modules`), not for exposing CLI binaries globally. Use `npm link` instead, which correctly symlinks the `relay-gent` binary to a directory on your PATH.
+
+### Standalone Binary (no Bun required)
+
+Compile relay-gent into a single native binary with the Bun runtime embedded:
+
+```bash
+git clone https://github.com/JalenEvans/relay-gent
+cd relay-gent
+bun install
+bun build ./bin/relay-gent.ts --compile --outfile relay-gent
+./relay-gent status
+```
+
+The resulting `relay-gent` binary is fully self-contained — it runs on any matching OS/architecture **without Bun installed**. Move it anywhere on your PATH:
+
+```bash
+mv relay-gent ~/.local/bin/
+relay-gent status
+```
 
 ### From npm (when published)
 
@@ -35,7 +56,7 @@ npm install -g relay-gent
 bun install -g relay-gent
 ```
 
-> **Note:** relay-gent has not yet been published to npm. Track [issue #XX](https://github.com/JalenEvans/relay-gent) for availability.
+> **Note:** relay-gent has not yet been published to npm. Use the "From Source" or "Standalone Binary" methods above for now.
 
 ### Verify Installation
 
