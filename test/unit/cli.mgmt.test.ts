@@ -246,6 +246,10 @@ describe("clean command", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     loadConfigSpy = vi.spyOn(configLoader, "loadConfig");
+    processMgrSpy = vi
+      .spyOn(processModule, "ProcessManager")
+      // @ts-expect-error — mock constructor for testing
+      .mockImplementation(() => mockProcessManager);
   });
 
   it("without --force shows available targets and suggests using --force", async () => {
@@ -259,25 +263,25 @@ describe("clean command", () => {
     expect(stdout).toMatch(/force|target|would/i);
   });
 
-  it("with --force removes state directories and confirms cleaning", async () => {
+  it("with --force removes state directories via ProcessManager", async () => {
     loadConfigSpy.mockReturnValue(baseConfig(MOCK_TARGETS));
-    const rmSyncSpy = vi.spyOn(fs, "rmSync").mockReturnValue(undefined);
+    mockProcessManager.cleanTarget.mockResolvedValue(undefined);
 
-    const { stdout } = await runWithArgs(["clean", "--force"]);
+    const { stdout, exitCode } = await runWithArgs(["clean", "--force"]);
 
     // Should not just print the stub message
     expect(stdout).not.toMatch(/not yet implemented/i);
 
     // Should confirm that cleaning happened
-    expect(stdout).toMatch(/cleaned|removed|done|✅|✔/i);
+    expect(stdout).toMatch(/cleaned|removed|done/i);
 
-    // Should remove targets/ path (StateStore layout)
-    expect(rmSyncSpy).toHaveBeenCalledWith(
-      expect.stringContaining("targets"),
-      expect.anything(),
-    );
+    // Should call ProcessManager.cleanTarget for each configured target
+    expect(processMgrSpy).toHaveBeenCalledTimes(1);
+    expect(mockProcessManager.cleanTarget).toHaveBeenCalledTimes(2);
+    expect(mockProcessManager.cleanTarget).toHaveBeenCalledWith("web");
+    expect(mockProcessManager.cleanTarget).toHaveBeenCalledWith("api");
 
-    rmSyncSpy.mockRestore();
+    expect(exitCode).toBe(0);
   });
 
   it("shows message and exits with code 0 when nothing to clean", async () => {

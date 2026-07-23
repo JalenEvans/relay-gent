@@ -157,10 +157,15 @@ describe("status command", () => {
     vi.clearAllMocks();
     vi.spyOn(os, "homedir").mockReturnValue("/tmp/relay-gent-test-home");
     loadConfigSpy = vi.spyOn(configLoader, "loadConfig");
+    processMgrSpy = vi
+      .spyOn(processModule, "ProcessManager")
+      // @ts-expect-error — mock constructor for testing
+      .mockImplementation(() => mockProcessManager);
   });
 
   it("is executable without arguments and exits with code 0", async () => {
     loadConfigSpy.mockReturnValue(baseConfig());
+    mockProcessManager.status.mockResolvedValue([]);
     const { stdout, exitCode } = await runWithArgs([]);
 
     // Status should produce output (table, list, or message)
@@ -170,15 +175,24 @@ describe("status command", () => {
     expect(exitCode).toBe(0);
   });
 
-  it("includes target names in output when config has targets", async () => {
+  it("includes target names and live process status in output", async () => {
     loadConfigSpy.mockReturnValue(baseConfig(MOCK_TARGETS));
+    mockProcessManager.status.mockResolvedValue([
+      { name: "web", pid: 4821, state: "running", delivered: 14 },
+    ]);
     const { stdout, exitCode } = await runWithArgs(["status"]);
 
     // The status output should mention the configured target name
     expect(stdout).toContain("web");
 
-    // Should display as a table row or show status indicator
-    expect(stdout).toMatch(/ \||idle/);
+    // Should show live process status info (pid, delivered count, state)
+    expect(stdout).toContain("4821");
+    expect(stdout).toContain("14");
+    expect(stdout).toContain("delivered");
+
+    // ProcessManager should be invoked to gather live status
+    expect(processMgrSpy).toHaveBeenCalled();
+    expect(mockProcessManager.status).toHaveBeenCalled();
 
     // Should exit successfully
     expect(exitCode).toBe(0);
@@ -186,6 +200,7 @@ describe("status command", () => {
 
   it("handles missing targets gracefully without crashing", async () => {
     loadConfigSpy.mockReturnValue(baseConfig({}));
+    mockProcessManager.status.mockResolvedValue([]);
     const { stdout, exitCode } = await runWithArgs(["status"]);
 
     // Should not just print the stub message

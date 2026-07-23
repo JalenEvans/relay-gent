@@ -1,4 +1,4 @@
-import { existsSync, rmSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { readFile, readdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -44,25 +44,42 @@ function resolveAdapter(name: string): Adapter | undefined {
   }
 }
 
-/** Display the status table or a "no targets" message. */
-function displayStatus(config: { targets: Record<string, TargetConfig> }): void {
+/** Display the status table or a "no targets" message, using live process data. */
+async function displayStatus(config: { targets: Record<string, TargetConfig> }): Promise<void> {
   const names = Object.keys(config.targets);
   if (names.length === 0) {
     process.stdout.write("No targets configured\n");
     return;
   }
 
-  const lines: string[] = [];
-  const h = "Target                | Adapter             | Watch Path            | Status";
-  lines.push(h);
-  lines.push("─".repeat(h.length));
+  const pm = new ProcessManager(join(homedir(), ".relay-gent", "targets"));
+  const statuses = await pm.status();
+  const statusMap = new Map(statuses.map((s) => [s.name, s]));
+
+  const activeTargets = statuses.filter((s) => s.state === "running").length;
+  process.stdout.write(`relay-gent — ${activeTargets} active targets\n\n`);
 
   for (const name of names.sort()) {
     const t = config.targets[name];
-    lines.push(`${name.padEnd(20)} | ${t.adapter.padEnd(18)} | ${t.watchPath.padEnd(20)} | idle`);
+    const st = statusMap.get(name);
+
+    if (st && st.state === "running") {
+      process.stdout.write(
+        `  ${name.padEnd(20)} watching ${t.watchPath} → ${t.adapter.padEnd(18)} (pid ${st.pid}, ${st.delivered} delivered)\n`,
+      );
+    } else if (st && st.state === "stale") {
+      process.stdout.write(
+        `  ${name.padEnd(20)} ${t.watchPath.padEnd(20)} → stale (no longer running)\n`,
+      );
+    } else {
+      process.stdout.write(`  ${name.padEnd(20)} ${t.watchPath.padEnd(20)} → stopped\n`);
+    }
   }
 
-  process.stdout.write(`${lines.join("\n")}\n`);
+  process.stdout.write(
+    "\n  Use 'relay-gent stop --target <name>' to stop a watcher.\n" +
+      "  Use 'relay-gent log --target <name>' to view logs.\n",
+  );
 }
 
 /** Signal the process to exit with the given code. */
@@ -87,10 +104,10 @@ export function createCli(): Command {
   const statusCmd = program
     .command("status", { isDefault: true })
     .description("Show all running targets")
-    .action(() => {
+    .action(async () => {
       try {
         const config = loadConfig();
-        displayStatus(config);
+        await displayStatus(config);
         exitProgram(0);
       } catch (error) {
         if (error instanceof CommanderError) throw error;
@@ -306,7 +323,7 @@ export function createCli(): Command {
     .command("clean")
     .description("Remove stale targets")
     .option("--force", "Force clean without confirmation")
-    .action((options: { force?: boolean }) => {
+    .action(async (options: { force?: boolean }) => {
       try {
         if (!options.force) {
           process.stdout.write("Use --force to remove stale state directories\n");
@@ -322,10 +339,9 @@ export function createCli(): Command {
           return;
         }
 
-        const stateBase = join(homedir(), ".relay-gent", "targets");
+        const pm = new ProcessManager(join(homedir(), ".relay-gent", "targets"));
         for (const name of names) {
-          const targetDir = join(stateBase, name);
-          rmSync(targetDir, { recursive: true, force: true });
+          await pm.cleanTarget(name);
           process.stdout.write(`Cleaned state for target: ${name}\n`);
         }
         exitProgram(0);
