@@ -4,6 +4,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "bun:test";
 // file unlike vi.mock which globally pollutes the module registry in Bun.
 import * as configLoader from "../../src/config/loader";
 import * as runnerModule from "../../src/application/runner";
+import * as processModule from "../../src/process";
 import * as fs from "node:fs";
 import * as fsPromises from "node:fs/promises";
 
@@ -32,12 +33,25 @@ afterAll(() => {
 
 let loadConfigSpy: ReturnType<typeof vi.spyOn>;
 let runnerSpy: ReturnType<typeof vi.spyOn>;
+let processMgrSpy: ReturnType<typeof vi.spyOn>;
 
 const mockRunnerStart = vi.fn(async () => {});
 const mockRunnerStop = vi.fn(async () => {});
 const mockRunnerInstance = {
   start: mockRunnerStart,
   stop: mockRunnerStop,
+};
+
+const mockProcessManager = {
+  stop: vi.fn(),
+  start: vi.fn(),
+  status: vi.fn(),
+  cleanTarget: vi.fn(),
+  getPidPath: vi.fn(),
+  readLog: vi.fn().mockResolvedValue("log content\n"),
+  clearLog: vi.fn().mockResolvedValue(undefined),
+  readAllLogs: vi.fn().mockResolvedValue("=== web ===\nlog content\n"),
+  stopAll: vi.fn().mockResolvedValue(["web", "api"]),
 };
 
 // ============================================================
@@ -154,29 +168,42 @@ describe("stop command", () => {
       .spyOn(runnerModule, "Runner")
       // @ts-expect-error — mock constructor for testing
       .mockImplementation(() => mockRunnerInstance);
+    processMgrSpy = vi
+      .spyOn(processModule, "ProcessManager")
+      // @ts-expect-error — mock constructor for testing
+      .mockImplementation(() => mockProcessManager);
   });
 
-  it("--target <name> prints process management message", async () => {
+  it("--target <name> calls ProcessManager.stop()", async () => {
     loadConfigSpy.mockReturnValue(baseConfig(MOCK_TARGETS));
-    const { stdout, exitCode } = await runWithArgs(["stop", "--target", "web"]);
+    mockProcessManager.stop.mockResolvedValue(undefined);
+    const { exitCode } = await runWithArgs(["stop", "--target", "web"]);
 
-    // Should print honest message about process management not being available
-    expect(stdout).toMatch(/process management|not yet implemented/i);
+    // Should call ProcessManager.stop with the target name
+    expect(processMgrSpy).toHaveBeenCalledTimes(1);
+    expect(mockProcessManager.stop).toHaveBeenCalledWith("web");
     expect(exitCode).toBe(0);
 
-    // Runner should NOT be created (cross-process stop doesn't work yet)
+    // Runner should NOT be created (cross-process stop uses ProcessManager)
     expect(runnerSpy).not.toHaveBeenCalled();
   });
 
-  it("--all prints process management message", async () => {
+  it("--all calls ProcessManager.stopAll()", async () => {
     loadConfigSpy.mockReturnValue(baseConfig(MOCK_TARGETS));
-    const { stdout, exitCode } = await runWithArgs(["stop", "--all"]);
+    mockProcessManager.stopAll.mockResolvedValue(["web", "api"]);
+    const { exitCode, stdout } = await runWithArgs(["stop", "--all"]);
 
-    // Should print honest message about process management not being available
-    expect(stdout).toMatch(/process management|not yet implemented/i);
+    // Should call ProcessManager.stopAll() once (not stop() per target)
+    expect(processMgrSpy).toHaveBeenCalledTimes(1);
+    expect(mockProcessManager.stopAll).toHaveBeenCalledTimes(1);
+    expect(mockProcessManager.stop).not.toHaveBeenCalled();
+
+    // Should report which targets were stopped based on stopAll() return
+    expect(stdout).toContain("web");
+    expect(stdout).toContain("api");
     expect(exitCode).toBe(0);
 
-    // Runner should NOT be created (cross-process stop doesn't work yet)
+    // Runner should NOT be created (cross-process stop uses ProcessManager)
     expect(runnerSpy).not.toHaveBeenCalled();
   });
 
@@ -226,6 +253,10 @@ describe("clean command", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     loadConfigSpy = vi.spyOn(configLoader, "loadConfig");
+    processMgrSpy = vi
+      .spyOn(processModule, "ProcessManager")
+      // @ts-expect-error — mock constructor for testing
+      .mockImplementation(() => mockProcessManager);
   });
 
   it("without --force shows available targets and suggests using --force", async () => {
@@ -239,25 +270,25 @@ describe("clean command", () => {
     expect(stdout).toMatch(/force|target|would/i);
   });
 
-  it("with --force removes state directories and confirms cleaning", async () => {
+  it("with --force removes state directories via ProcessManager", async () => {
     loadConfigSpy.mockReturnValue(baseConfig(MOCK_TARGETS));
-    const rmSyncSpy = vi.spyOn(fs, "rmSync").mockReturnValue(undefined);
+    mockProcessManager.cleanTarget.mockResolvedValue(undefined);
 
-    const { stdout } = await runWithArgs(["clean", "--force"]);
+    const { stdout, exitCode } = await runWithArgs(["clean", "--force"]);
 
     // Should not just print the stub message
     expect(stdout).not.toMatch(/not yet implemented/i);
 
     // Should confirm that cleaning happened
-    expect(stdout).toMatch(/cleaned|removed|done|✅|✔/i);
+    expect(stdout).toMatch(/cleaned|removed|done/i);
 
-    // Should remove targets/ path (StateStore layout)
-    expect(rmSyncSpy).toHaveBeenCalledWith(
-      expect.stringContaining("targets"),
-      expect.anything(),
-    );
+    // Should call ProcessManager.cleanTarget for each configured target
+    expect(processMgrSpy).toHaveBeenCalledTimes(1);
+    expect(mockProcessManager.cleanTarget).toHaveBeenCalledTimes(2);
+    expect(mockProcessManager.cleanTarget).toHaveBeenCalledWith("web");
+    expect(mockProcessManager.cleanTarget).toHaveBeenCalledWith("api");
 
-    rmSyncSpy.mockRestore();
+    expect(exitCode).toBe(0);
   });
 
   it("shows message and exits with code 0 when nothing to clean", async () => {
@@ -280,13 +311,15 @@ describe("log command", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     loadConfigSpy = vi.spyOn(configLoader, "loadConfig");
+    processMgrSpy = vi
+      .spyOn(processModule, "ProcessManager")
+      // @ts-expect-error — mock constructor for testing
+      .mockImplementation(() => mockProcessManager);
   });
 
   it("--target <name> reads and shows log content", async () => {
     const logContent = "line1\nline2\nline3";
-    const readFileSpy = vi
-      .spyOn(fsPromises, "readFile")
-      .mockResolvedValue(logContent);
+    mockProcessManager.readLog.mockResolvedValue(logContent);
 
     const { stdout } = await runWithArgs(["log", "--target", "web"]);
 
@@ -294,41 +327,41 @@ describe("log command", () => {
     expect(stdout).toContain("line1");
     expect(stdout).toContain("line2");
 
-    readFileSpy.mockRestore();
+    // Should call ProcessManager.readLog with the target name
+    expect(mockProcessManager.readLog).toHaveBeenCalledWith("web");
   });
 
   it("--clear wipes the log file for the given target", async () => {
-    const writeFileSpy = vi
-      .spyOn(fsPromises, "writeFile")
-      .mockResolvedValue(undefined);
-
     const { stdout } = await runWithArgs(["log", "--target", "web", "--clear"]);
 
-    // Should have written an empty string or truncated the file
-    expect(writeFileSpy).toHaveBeenCalled();
+    // Should call ProcessManager.clearLog with the target name
+    expect(mockProcessManager.clearLog).toHaveBeenCalledWith("web");
 
     // Should confirm the log was cleared
     expect(stdout).toMatch(/cleared|wiped|done/i);
-
-    writeFileSpy.mockRestore();
   });
 
-  it("without any options does not show the stub message", async () => {
-    vi.spyOn(fsPromises, "readdir").mockResolvedValue([]);
-
+  it("without any options lists all logs via ProcessManager.readAllLogs()", async () => {
     const { stdout, exitCode } = await runWithArgs(["log"]);
 
     // Should not just say "not yet implemented"
     expect(stdout).not.toMatch(/not yet implemented/i);
 
+    // Should call ProcessManager.readAllLogs
+    expect(mockProcessManager.readAllLogs).toHaveBeenCalled();
+
+    // Should display the aggregated log content from readAllLogs
+    expect(stdout).toContain("web");
+    expect(stdout).toContain("log content");
+
     // Should exit successfully (listing logs is not an error)
     expect(exitCode).toBe(0);
-
-    vi.restoreAllMocks();
   });
 
   it("shows error and exits with code 1 when target is not found for log", async () => {
     loadConfigSpy.mockReturnValue(baseConfig(MOCK_TARGETS));
+    // Return empty string so the handler falls through to the config check
+    mockProcessManager.readLog.mockResolvedValue("");
     const { stderr, exitCode } = await runWithArgs([
       "log",
       "--target",

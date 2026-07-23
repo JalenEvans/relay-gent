@@ -177,8 +177,8 @@ describe("status command", () => {
     writeConfig(VALID_CONFIG_TOML);
     const { stdout } = runCli(["status"]);
     expect(stdout).toContain("web");
-    expect(stdout).toContain("opencode");
     expect(stdout).toContain("relay-test.log");
+    expect(stdout).toContain("stopped");
   });
 
   it("shows multi-target table when config has multiple targets", () => {
@@ -307,10 +307,11 @@ describe("stop command", () => {
     expect(exitCode).toBe(1);
   });
 
-  it("shows --all status message when no targets configured", () => {
+  it("--all exits successfully when no targets configured", () => {
     removeConfig();
     const { stdout, exitCode } = runCli(["stop", "--all"]);
-    expect(stdout).toContain("Process management is not yet implemented");
+    // Should no longer show the "not yet implemented" stub message
+    expect(stdout).not.toContain("not yet implemented");
     expect(exitCode).toBe(0);
   });
 });
@@ -381,9 +382,9 @@ describe("log command", () => {
 
   it("lists available log targets when logs exist", () => {
     writeConfig(VALID_CONFIG_TOML);
-    const logDir = join(tmpHome, ".relay-gent", "logs");
+    const logDir = join(tmpHome, ".relay-gent", "targets", "web");
     mkdirSync(logDir, { recursive: true });
-    writeFileSync(join(logDir, "web.log"), "test log content\n", "utf-8");
+    writeFileSync(join(logDir, "log"), "test log content\n", "utf-8");
 
     const { stdout } = runCli(["log"]);
     expect(stdout).toContain("web");
@@ -391,10 +392,10 @@ describe("log command", () => {
 
   it("displays log content for a specific target", () => {
     writeConfig(VALID_CONFIG_TOML);
-    const logDir = join(tmpHome, ".relay-gent", "logs");
+    const logDir = join(tmpHome, ".relay-gent", "targets", "web");
     mkdirSync(logDir, { recursive: true });
     const logContent = "[2024-01-01T00:00:00Z] [info] Server started\n";
-    writeFileSync(join(logDir, "web.log"), logContent, "utf-8");
+    writeFileSync(join(logDir, "log"), logContent, "utf-8");
 
     const { stdout } = runCli(["log", "--target", "web"]);
     expect(stdout).toContain("Server started");
@@ -403,18 +404,17 @@ describe("log command", () => {
 
   it("--clear wipes the log file for the given target", () => {
     writeConfig(VALID_CONFIG_TOML);
-    const logDir = join(tmpHome, ".relay-gent", "logs");
+    const logDir = join(tmpHome, ".relay-gent", "targets", "web");
     mkdirSync(logDir, { recursive: true });
-    writeFileSync(join(logDir, "web.log"), "some old content\n", "utf-8");
+    writeFileSync(join(logDir, "log"), "some old content\n", "utf-8");
 
     const { stdout } = runCli(["log", "--target", "web", "--clear"]);
     expect(stdout).toContain("Cleared logs for target: web");
 
-    // After clearing, the log file is empty so readFile returns "".
-    // The catch block won't fire (no error on empty file), so stdout
-    // will be empty (the file content is an empty string).
+    // After clearing, readLog returns "" so the CLI outputs
+    // "No logs found for target: web" (target exists, but log is empty).
     const { stdout: verifyStdout } = runCli(["log", "--target", "web"]);
-    expect(verifyStdout).toBe("");
+    expect(verifyStdout).toContain("No logs found for target: web");
   });
 });
 
@@ -431,7 +431,7 @@ describe("config loading", () => {
     writeConfig(VALID_CONFIG_TOML);
     const { stdout } = runCli(["status"]);
     expect(stdout).toContain("web");
-    expect(stdout).toContain("opencode");
+    expect(stdout).toContain("stopped");
   });
 
   it("loads multi-target config correctly", () => {
@@ -498,8 +498,8 @@ describe("config precedence", () => {
       RELAY_GENT_TARGET_NEW_PARSER: "json-lines",
     });
     expect(stdout).toContain("new");
-    expect(stdout).toContain("opencode");
     expect(stdout).toContain("/tmp/new.log");
+    expect(stdout).toContain("stopped");
   });
 
   it("CLI --target flag takes precedence (validated via error messages)", () => {

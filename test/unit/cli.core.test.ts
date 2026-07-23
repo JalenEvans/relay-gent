@@ -9,6 +9,7 @@ import { createCli } from "../../src/cli";
 // file unlike vi.mock which globally pollutes the module registry in Bun.
 import * as configLoader from "../../src/config/loader";
 import * as runnerModule from "../../src/application/runner";
+import * as processModule from "../../src/process";
 
 // ============================================================
 // Tests for the CLI core commands — updated after review to assert correct behavior
@@ -41,6 +42,15 @@ const mockRunnerInstance = {
   stop: mockRunnerStop,
 };
 let runnerSpy: ReturnType<typeof vi.spyOn>;
+let processMgrSpy: ReturnType<typeof vi.spyOn>;
+
+const mockProcessManager = {
+  start: vi.fn(),
+  stop: vi.fn(),
+  status: vi.fn(),
+  cleanTarget: vi.fn(),
+  getPidPath: vi.fn(),
+};
 
 // ============================================================
 // Helpers — shared test utilities
@@ -147,10 +157,15 @@ describe("status command", () => {
     vi.clearAllMocks();
     vi.spyOn(os, "homedir").mockReturnValue("/tmp/relay-gent-test-home");
     loadConfigSpy = vi.spyOn(configLoader, "loadConfig");
+    processMgrSpy = vi
+      .spyOn(processModule, "ProcessManager")
+      // @ts-expect-error — mock constructor for testing
+      .mockImplementation(() => mockProcessManager);
   });
 
   it("is executable without arguments and exits with code 0", async () => {
     loadConfigSpy.mockReturnValue(baseConfig());
+    mockProcessManager.status.mockResolvedValue([]);
     const { stdout, exitCode } = await runWithArgs([]);
 
     // Status should produce output (table, list, or message)
@@ -160,15 +175,24 @@ describe("status command", () => {
     expect(exitCode).toBe(0);
   });
 
-  it("includes target names in output when config has targets", async () => {
+  it("includes target names and live process status in output", async () => {
     loadConfigSpy.mockReturnValue(baseConfig(MOCK_TARGETS));
+    mockProcessManager.status.mockResolvedValue([
+      { name: "web", pid: 4821, state: "running", delivered: 14 },
+    ]);
     const { stdout, exitCode } = await runWithArgs(["status"]);
 
     // The status output should mention the configured target name
     expect(stdout).toContain("web");
 
-    // Should display as a table row or show status indicator
-    expect(stdout).toMatch(/ \||idle/);
+    // Should show live process status info (pid, delivered count, state)
+    expect(stdout).toContain("4821");
+    expect(stdout).toContain("14");
+    expect(stdout).toContain("delivered");
+
+    // ProcessManager should be invoked to gather live status
+    expect(processMgrSpy).toHaveBeenCalled();
+    expect(mockProcessManager.status).toHaveBeenCalled();
 
     // Should exit successfully
     expect(exitCode).toBe(0);
@@ -176,6 +200,7 @@ describe("status command", () => {
 
   it("handles missing targets gracefully without crashing", async () => {
     loadConfigSpy.mockReturnValue(baseConfig({}));
+    mockProcessManager.status.mockResolvedValue([]);
     const { stdout, exitCode } = await runWithArgs(["status"]);
 
     // Should not just print the stub message
@@ -191,13 +216,31 @@ describe("status command", () => {
 // ============================================================
 
 describe("watch command", () => {
-  beforeEach(() => {
+  let tmpDir: string;
+  let tmpFile: string;
+
+  beforeEach(async () => {
     vi.clearAllMocks();
+    vi.spyOn(os, "homedir").mockReturnValue("/tmp/relay-gent-test-home");
     loadConfigSpy = vi.spyOn(configLoader, "loadConfig");
     runnerSpy = vi
       .spyOn(runnerModule, "Runner")
       // @ts-expect-error — mock constructor for testing
       .mockImplementation(() => mockRunnerInstance);
+    processMgrSpy = vi
+      .spyOn(processModule, "ProcessManager")
+      // @ts-expect-error — mock constructor for testing
+      .mockImplementation(() => mockProcessManager);
+
+    tmpDir = await mkdtemp(join(tmpdir(), "relay-gent-watch-"));
+    tmpFile = join(tmpDir, "test-file.md");
+    await writeFile(tmpFile, "test content", "utf-8");
+  });
+
+  afterEach(async () => {
+    if (tmpDir) {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
   });
 
   it("shows error and exits with code 1 when target is not found", async () => {
@@ -251,6 +294,64 @@ describe("watch command", () => {
 
     // Runner constructor should never be called for missing files
     expect(runnerSpy).not.toHaveBeenCalled();
+  });
+
+  it("--background flag calls ProcessManager.start()", async () => {
+    loadConfigSpy.mockReturnValue(baseConfig(MOCK_TARGETS));
+    mockProcessManager.start.mockResolvedValue(undefined);
+    const { exitCode } = await runWithArgs([
+      "watch",
+      tmpFile,
+      "--target",
+      "web",
+      "--background",
+    ]);
+
+    // ProcessManager constructor should be called with the targets base dir
+    expect(processMgrSpy).toHaveBeenCalledTimes(1);
+    expect(processMgrSpy).toHaveBeenCalledWith(
+      expect.stringContaining(".relay-gent/targets"),
+    );
+
+    // ProcessManager.start should be called with the target name
+    expect(mockProcessManager.start).toHaveBeenCalledWith("web");
+
+    // Runner should NOT be created when running in background mode
+    expect(runnerSpy).not.toHaveBeenCalled();
+
+    // No errors expected
+    expect(exitCode).toBe(0);
+  });
+
+  it("without --background still uses Runner with foreground:true", async () => {
+    loadConfigSpy.mockReturnValue(baseConfig(MOCK_TARGETS));
+    const { exitCode } = await runWithArgs([
+      "watch",
+      tmpFile,
+      "--target",
+      "web",
+    ]);
+
+    // Runner constructor should have been called with the target config
+    expect(runnerSpy).toHaveBeenCalledTimes(1);
+    expect(runnerSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ adapter: "opencode" }),
+      expect.anything(), // parser
+      expect.anything(), // adapter
+      expect.anything(), // delta
+      expect.anything(), // store
+    );
+
+    // Runner.start should have been called with foreground:true
+    expect(mockRunnerStart).toHaveBeenCalledTimes(1);
+    expect(mockRunnerStart).toHaveBeenCalledWith({ foreground: true });
+
+    // ProcessManager should NOT be created when running in foreground mode
+    expect(processMgrSpy).not.toHaveBeenCalled();
+
+    // Foreground watch runs indefinitely — no explicit exitProgram call,
+    // so exitCode remains null (not an error state)
+    expect(exitCode).toBeNull();
   });
 });
 
