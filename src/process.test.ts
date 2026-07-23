@@ -1,11 +1,11 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi, beforeAll } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
+import * as fs from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import * as fs from "node:fs";
-import { ProcessManager } from "./process";
-import * as configLoader from "./config/loader";
 import * as runnerModule from "./application/runner";
+import * as configLoader from "./config/loader";
+import { ProcessManager } from "./process";
 
 // ============================================================
 // ProcessManager — background daemonization and PID management
@@ -376,7 +376,7 @@ describe("Runner Worker — run()", () => {
 
   beforeAll(async () => {
     // Dynamic import with cache busting; the file does not exist yet → Red phase
-    const mod = await import("./runner-worker?t=" + Date.now());
+    const mod = await import(`./runner-worker?t=${Date.now()}`);
     run = mod.run;
   });
 
@@ -446,10 +446,9 @@ describe("Runner Worker — run()", () => {
     await run("web");
 
     // Should create the log directory with recursive flag
-    expect(mkdirSyncSpy).toHaveBeenCalledWith(
-      expect.stringContaining(join("targets", "web")),
-      { recursive: true },
-    );
+    expect(mkdirSyncSpy).toHaveBeenCalledWith(expect.stringContaining(join("targets", "web")), {
+      recursive: true,
+    });
 
     mkdirSyncSpy.mockRestore();
   });
@@ -533,11 +532,11 @@ describe("ProcessManager — Log Management", () => {
       "[2024-06-01T10:00:02.000Z] WARN: parse error on line 42",
       "[2024-06-01T10:00:03.000Z] INFO: delivered 3 records",
     ];
-    await writeFile(logPath(tmpDir, "test-target"), lines.join("\n") + "\n", "utf-8");
+    await writeFile(logPath(tmpDir, "test-target"), `${lines.join("\n")}\n`, "utf-8");
 
     const content = await manager.readLog("test-target");
 
-    expect(content).toBe(lines.join("\n") + "\n");
+    expect(content).toBe(`${lines.join("\n")}\n`);
   });
 
   // ----------------------------------------------------------
@@ -556,7 +555,7 @@ describe("ProcessManager — Log Management", () => {
     for (let i = 1; i <= totalLines; i++) {
       lines.push(`[2024-06-01T10:00:00.000Z] INFO: log line ${i}`);
     }
-    await writeFile(logPath(tmpDir, "test-target"), lines.join("\n") + "\n", "utf-8");
+    await writeFile(logPath(tmpDir, "test-target"), `${lines.join("\n")}\n`, "utf-8");
 
     const lastLinesCount = 50;
     const content = await manager.readLog("test-target", lastLinesCount);
@@ -630,15 +629,15 @@ describe("ProcessManager — Log Management", () => {
     await mkdir(targetDir(tmpDir, "target-a"), { recursive: true });
     await mkdir(targetDir(tmpDir, "target-b"), { recursive: true });
 
-    const logA = [
+    const logA = `${[
       "[2024-06-01T10:00:00.000Z] INFO: target-a line 1",
       "[2024-06-01T10:00:01.000Z] INFO: target-a line 2",
-    ].join("\n") + "\n";
+    ].join("\n")}\n`;
 
-    const logB = [
+    const logB = `${[
       "[2024-06-01T10:00:00.000Z] ERROR: target-b error",
       "[2024-06-01T10:00:01.000Z] INFO: target-b recovery",
-    ].join("\n") + "\n";
+    ].join("\n")}\n`;
 
     await writeFile(logPath(tmpDir, "target-a"), logA, "utf-8");
     await writeFile(logPath(tmpDir, "target-b"), logB, "utf-8");
