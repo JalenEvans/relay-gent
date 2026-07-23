@@ -42,16 +42,33 @@ export class ProcessManager {
 
   async stop(name: string): Promise<void> {
     const pidPath = this.getPidPath(name);
-    const pid = Number.parseInt(await readFile(pidPath, "utf-8"), 10);
+    const targetDir = join(this.baseDir, name);
 
-    // Send SIGTERM
-    process.kill(pid, "SIGTERM");
+    let pid: number;
+    try {
+      pid = Number.parseInt(await readFile(pidPath, "utf-8"), 10);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        // PID file doesn't exist — target already stopped or never started
+        return;
+      }
+      throw err;
+    }
+
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ESRCH") {
+        throw err; // Re-throw unexpected errors (permissions, etc.)
+      }
+      // ESRCH means process already dead — proceed with cleanup
+    }
 
     // Wait briefly for graceful shutdown
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 2000));
 
     // Remove target directory
-    await rm(join(this.baseDir, name), { recursive: true, force: true });
+    await rm(targetDir, { recursive: true, force: true });
   }
 
   /**
@@ -94,8 +111,19 @@ export class ProcessManager {
       let delivered = 0;
 
       if (existsSync(pidPath)) {
-        pid = Number.parseInt(await readFile(pidPath, "utf-8"), 10);
-        state = this.isAlive(pid) ? "running" : "stale";
+        try {
+          const raw = await readFile(pidPath, "utf-8");
+          pid = Number.parseInt(raw.trim(), 10);
+          if (!Number.isFinite(pid) || pid <= 0) {
+            pid = null;
+            state = "stale";
+          } else {
+            state = this.isAlive(pid) ? "running" : "stale";
+          }
+        } catch {
+          pid = null;
+          state = "stale";
+        }
       }
 
       // Read delivered count from state.json (default 0)
@@ -141,8 +169,8 @@ export class ProcessManager {
   }
 
   /**
-   * Clear the target's log file.
-   * No-op if the log file doesn't exist.
+   * Clear the target's log file by truncating it to empty.
+   * Creates an empty log file if none existed.
    */
   async clearLog(name: string): Promise<void> {
     const logPath = join(this.baseDir, name, "log");
@@ -172,6 +200,7 @@ export class ProcessManager {
   }
 
   isAlive(pid: number): boolean {
+    if (!Number.isFinite(pid) || pid <= 0) return false;
     try {
       process.kill(pid, 0);
       return true;

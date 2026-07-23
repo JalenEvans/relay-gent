@@ -38,7 +38,7 @@ See [Environment Variables Reference](../reference/environment-variables.md)
 
 `relay-gent` or `relay-gent status`
 
-Shows a dashboard of all configured targets with their adapter, watch path, and current status.
+Shows a live dashboard of all configured targets with their adapter, watch path, current status (running, stopped, or stale), PID, and delivery counts.
 
 ### watch
 
@@ -52,6 +52,8 @@ Starts watching a file for changes using chokidar. The `--target` flag is requir
 
 The process stays alive until interrupted (Ctrl+C).
 
+- `--background` — Fork watcher to background (daemonize). Returns immediately to prompt.
+
 ### once
 
 `relay-gent once <file> --target <name>`
@@ -62,13 +64,16 @@ One-shot execution. The `--target` flag is required — it specifies which confi
 
 `relay-gent stop --target <name>` or `relay-gent stop --all`
 
-**Not yet implemented** — cross-process process management is planned for a future epic. Currently outputs a message and exits.
+Stops running watcher processes.
+
+- `stop --target <name>` — sends SIGTERM to the watcher process, waits for graceful shutdown (up to 2s), then removes the target's state directory
+- `stop --all` — stops all running watchers
 
 ### clean
 
 `relay-gent clean [--force]`
 
-Removes all configured target state directories under `~/.relay-gent/targets/`.
+Removes stale target state directories under `~/.relay-gent/targets/`.
 
 - With `--force`: immediately removes state for all configured targets
 - Without `--force`: prompts to use `--force`
@@ -77,7 +82,7 @@ Removes all configured target state directories under `~/.relay-gent/targets/`.
 
 `relay-gent log [--target <name>] [--clear]`
 
-View or clear per-target logs stored at `~/.relay-gent/logs/<name>.log`.
+View or clear per-target logs stored at `~/.relay-gent/targets/<name>/log`.
 
 - Without flags: lists all targets that have log files
 - `--target <name>`: prints the log content for that target
@@ -87,5 +92,5 @@ View or clear per-target logs stored at `~/.relay-gent/logs/<name>.log`.
 
 | Code | Meaning |
 |------|---------|
-| 0 | Success (including `stop --target <name>` with a valid target — outputs "not implemented" and exits cleanly) |
+| 0 | Success |
 | 1 | Error (invalid args, missing target in config, file not found, adapter/parser not found) |
