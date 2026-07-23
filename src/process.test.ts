@@ -1,8 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi, beforeAll } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import * as fs from "node:fs";
 import { ProcessManager } from "./process";
+import * as configLoader from "./config/loader";
+import * as runnerModule from "./application/runner";
 
 // ============================================================
 // ProcessManager — background daemonization and PID management
@@ -318,5 +321,172 @@ describe("ProcessManager — getPidPath()", () => {
     const path = manager.getPidPath("my-target");
 
     expect(path).toBe("/tmp/test-base/my-target/pid");
+  });
+});
+
+// ============================================================
+// 7. Runner Worker — forked process entry point (Red phase)
+// ============================================================
+// Tests for src/runner-worker.ts entry point.
+// These will FAIL (Red phase) because the file does not exist yet.
+// Once implemented, the worker exports a `run(targetName: string)`
+// function and uses `import.meta.main` to guard top-level execution.
+// ============================================================
+// API:
+//   run(targetName)  → starts the full pipeline (config → runner → foreground)
+//
+// The worker is spawned via Bun.spawn(["bun", "run", "src/runner-worker.ts", name]).
+// ============================================================
+
+describe("Runner Worker — run()", () => {
+  let loadConfigSpy: ReturnType<typeof vi.spyOn>;
+  let runnerSpy: ReturnType<typeof vi.spyOn>;
+  let run: (targetName: string) => Promise<void>;
+
+  const mockRunnerStart = vi.fn(async () => {});
+  const mockRunnerStop = vi.fn(async () => {});
+  const mockRunnerInstance = {
+    start: mockRunnerStart,
+    stop: mockRunnerStop,
+  };
+
+  const MOCK_TARGETS: Record<string, Record<string, unknown>> = {
+    web: {
+      adapter: "opencode",
+      watchPath: "./src",
+      parser: "json-lines",
+      server_url: "http://localhost:4096",
+    },
+  };
+
+  function baseConfig(
+    targets: Record<string, Record<string, unknown>> = {},
+  ): Record<string, unknown> {
+    return {
+      schemaVersion: 1,
+      defaultAdapter: "opencode",
+      defaults: { debounceMs: 300, maxRetries: 3, retryBackoffMs: 1000 },
+      targets,
+    };
+  }
+
+  beforeAll(async () => {
+    // Dynamic import with cache busting; the file does not exist yet → Red phase
+    const mod = await import("./runner-worker?t=" + Date.now());
+    run = mod.run;
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    loadConfigSpy = vi.spyOn(configLoader, "loadConfig");
+    runnerSpy = vi
+      .spyOn(runnerModule, "Runner")
+      // @ts-expect-error — mock constructor returns a partial mock instance
+      .mockImplementation(() => mockRunnerInstance);
+  });
+
+  afterAll(() => {
+    vi.restoreAllMocks();
+  });
+
+  // ----------------------------------------------------------
+  // 7a. Missing target name
+  // ----------------------------------------------------------
+
+  it("throws when target name is not provided", async () => {
+    await expect(run("")).rejects.toThrow(/target name/i);
+  });
+
+  // ----------------------------------------------------------
+  // 7b. Target not found in configuration
+  // ----------------------------------------------------------
+
+  it("throws when target is not found in configuration", async () => {
+    loadConfigSpy.mockReturnValue(baseConfig({}));
+
+    await expect(run("nonexistent")).rejects.toThrow(/not found/i);
+  });
+
+  // ----------------------------------------------------------
+  // 7c. Pipeline component creation and foreground start
+  // ----------------------------------------------------------
+
+  it("creates StateStore, DeltaTracker, Runner and starts with foreground:true", async () => {
+    loadConfigSpy.mockReturnValue(baseConfig(MOCK_TARGETS));
+
+    await run("web");
+
+    // Runner constructor should be called once with the correct target config
+    expect(runnerSpy).toHaveBeenCalledTimes(1);
+    expect(runnerSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ adapter: "opencode" }),
+      expect.anything(), // parser
+      expect.anything(), // adapter
+      expect.anything(), // delta
+      expect.anything(), // store
+    );
+
+    // Runner.start must be called with foreground:true (not once mode)
+    expect(mockRunnerStart).toHaveBeenCalledTimes(1);
+    expect(mockRunnerStart).toHaveBeenCalledWith({ foreground: true });
+  });
+
+  // ----------------------------------------------------------
+  // 7d. Log file setup
+  // ----------------------------------------------------------
+
+  it("creates log directory at ~/.relay-gent/targets/<name> before starting Runner", async () => {
+    loadConfigSpy.mockReturnValue(baseConfig(MOCK_TARGETS));
+    const mkdirSyncSpy = vi.spyOn(fs, "mkdirSync").mockReturnValue(undefined);
+
+    await run("web");
+
+    // Should create the log directory with recursive flag
+    expect(mkdirSyncSpy).toHaveBeenCalledWith(
+      expect.stringContaining(join("targets", "web")),
+      { recursive: true },
+    );
+
+    mkdirSyncSpy.mockRestore();
+  });
+
+  // ----------------------------------------------------------
+  // 7e. SIGTERM handler registration
+  // ----------------------------------------------------------
+
+  it("registers SIGTERM handler during setup", async () => {
+    loadConfigSpy.mockReturnValue(baseConfig(MOCK_TARGETS));
+    const onSpy = vi.spyOn(process, "on");
+
+    await run("web");
+
+    // Must register a SIGTERM listener for graceful shutdown
+    expect(onSpy).toHaveBeenCalledWith("SIGTERM", expect.any(Function));
+
+    onSpy.mockRestore();
+  });
+
+  // ----------------------------------------------------------
+  // 7f. Error handling — Runner.start failure
+  // ----------------------------------------------------------
+
+  it("logs error and exits with code 1 when Runner.start() fails", async () => {
+    loadConfigSpy.mockReturnValue(baseConfig(MOCK_TARGETS));
+    const startError = new Error("Worker execution failed");
+    mockRunnerStart.mockRejectedValueOnce(startError);
+
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
+
+    await run("web");
+
+    // Must log the error that caused the failure
+    expect(consoleErrorSpy).toHaveBeenCalledWith(startError);
+
+    // Must exit with code 1 to signal failure to the parent process
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    consoleErrorSpy.mockRestore();
+    exitSpy.mockRestore();
   });
 });
