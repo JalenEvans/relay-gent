@@ -65,6 +65,24 @@ Tests use:
 - `bun:test` — describe/it/expect
 - `fast-check` — property-based testing for invariants
 
+## Continuous Integration
+
+The project uses GitHub Actions (see `.github/workflows/ci.yml`). The CI pipeline runs on every push and PR to `main`:
+
+| Step | Command |
+|------|---------|
+| Lint & format check | `bun run check` |
+| Run tests | `bun test` |
+| TypeScript compilation | `bun run build` |
+
+To reproduce locally before pushing:
+
+```bash
+bun run check
+bun test
+bun run build
+```
+
 ## Running the CLI
 
 The `relay-gent` binary runs via the bin entry in `package.json` or directly with Bun:

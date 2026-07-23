@@ -113,3 +113,5 @@ See [Adding Parsers](../development/adding-parsers.md) for the full step-by-step
 5. Add tests
 
 See [Adding Adapters](../development/adding-adapters.md) for the full step-by-step guide.
+
+> **Note:** While "plugin system" describes the interface-based extension design, there is currently no dynamic plugin discovery or runtime loading mechanism. Adapters are registered via hard-coded resolution functions in `cli.ts` and `runner-worker.ts`. A formal adapter registry (similar to `ParserRegistry`) is planned for future work.

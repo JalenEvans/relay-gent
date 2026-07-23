@@ -90,18 +90,41 @@ export { createSlackAdapter };
 - Return `DeliveredId[]` (strings) for tracking
 - `ready()` is optional but recommended for connection validation
 
-## 5. Register via Barrel
+## 5. Register via the Resolution Function
 
-Create or update `src/adapters/index.ts` (similar pattern to parsers):
+Unlike parsers (which use a `ParserRegistry` with a Map lookup), adapters use a **hardcoded resolution function** in `src/cli.ts` and `src/runner-worker.ts`. To register a new adapter:
+
+### 5a. Export from the barrel
+
+Add your adapter export to `src/adapters/index.ts`:
 
 ```ts
-import { createSlackAdapter } from "./slack";
-
-const adapters = new Map<string, Adapter>();
-adapters.set("slack", createSlackAdapter());
-
-export { adapters };
+export { RawCommandAdapter } from "./raw-command";
+export { createSlackAdapter } from "./slack";        // <-- add here
 ```
+
+### 5b. Update the resolution function
+
+Add your adapter to the `resolveAdapter()` function (found in both `src/cli.ts` and `src/runner-worker.ts`):
+
+```ts
+function resolveAdapter(name: string): Adapter | undefined {
+  switch (name) {
+    case "raw-command":
+      return new RawCommandAdapter();
+    case "slack":                                    // <-- add here
+      return createSlackAdapter();                   // <-- add here
+    case "opencode":
+    case "codex":
+    case "claude":
+      return { name, deliver: /* ... */ };
+    default:
+      return undefined;
+  }
+}
+```
+
+> **Note:** This hardcoded switch-based resolution is a known architectural limitation. Unlike parsers, adapters do not currently use a Map-based registry. Adding a new adapter requires updating the `resolveAdapter()` function in **both** `cli.ts` and `runner-worker.ts`. A formal adapter registry (similar to `ParserRegistry`) is planned for future work to eliminate this duplication.
 
 ## 6. Write Tests
 
