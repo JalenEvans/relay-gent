@@ -1,5 +1,4 @@
 import { existsSync } from "node:fs";
-import { readFile, readdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { Command, CommanderError } from "commander";
@@ -289,14 +288,9 @@ export function createCli(): Command {
             await pm.stop(targetName);
             process.stdout.write(`Stopped watcher for target: ${targetName}\n`);
           } else if (all) {
-            const names = Object.keys(config.targets);
-            for (const name of names) {
-              try {
-                await pm.stop(name);
-                process.stdout.write(`Stopped watcher for target: ${name}\n`);
-              } catch {
-                // Target wasn't running — skip
-              }
+            const stopped = await pm.stopAll();
+            for (const name of stopped) {
+              process.stdout.write(`Stopped watcher for target: ${name}\n`);
             }
           }
           exitProgram(0);
@@ -373,19 +367,17 @@ export function createCli(): Command {
           }
         }
 
-        const logDir = join(homedir(), ".relay-gent", "logs");
+        const pm = new ProcessManager(join(homedir(), ".relay-gent", "targets"));
 
         if (targetName) {
-          const logFile = join(logDir, `${targetName}.log`);
-
           if (clear) {
-            await writeFile(logFile, "", "utf-8");
+            await pm.clearLog(targetName);
             process.stdout.write(`Cleared logs for target: ${targetName}\n`);
           } else {
-            try {
-              const content = await readFile(logFile, "utf-8");
+            const content = await pm.readLog(targetName);
+            if (content) {
               process.stdout.write(content);
-            } catch {
+            } else {
               const config = loadConfig();
               if (!config.targets[targetName]) {
                 process.stderr.write(`Target '${targetName}' not found in configuration\n`);
@@ -396,17 +388,11 @@ export function createCli(): Command {
             }
           }
         } else {
-          let files: string[];
-          try {
-            files = await readdir(logDir);
-          } catch {
-            files = [];
-          }
-          const logNames = files.filter((f) => f.endsWith(".log")).map((f) => f.slice(0, -4));
-          if (logNames.length === 0) {
-            process.stdout.write("No logs available\n");
+          const content = await pm.readAllLogs();
+          if (content) {
+            process.stdout.write(content);
           } else {
-            process.stdout.write(`${logNames.join("\n")}\n`);
+            process.stdout.write("No logs available\n");
           }
         }
 
