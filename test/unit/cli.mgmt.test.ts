@@ -4,6 +4,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "bun:test";
 // file unlike vi.mock which globally pollutes the module registry in Bun.
 import * as configLoader from "../../src/config/loader";
 import * as runnerModule from "../../src/application/runner";
+import * as processModule from "../../src/process";
 import * as fs from "node:fs";
 import * as fsPromises from "node:fs/promises";
 
@@ -32,12 +33,21 @@ afterAll(() => {
 
 let loadConfigSpy: ReturnType<typeof vi.spyOn>;
 let runnerSpy: ReturnType<typeof vi.spyOn>;
+let processMgrSpy: ReturnType<typeof vi.spyOn>;
 
 const mockRunnerStart = vi.fn(async () => {});
 const mockRunnerStop = vi.fn(async () => {});
 const mockRunnerInstance = {
   start: mockRunnerStart,
   stop: mockRunnerStop,
+};
+
+const mockProcessManager = {
+  stop: vi.fn(),
+  start: vi.fn(),
+  status: vi.fn(),
+  cleanTarget: vi.fn(),
+  getPidPath: vi.fn(),
 };
 
 // ============================================================
@@ -154,29 +164,39 @@ describe("stop command", () => {
       .spyOn(runnerModule, "Runner")
       // @ts-expect-error — mock constructor for testing
       .mockImplementation(() => mockRunnerInstance);
+    processMgrSpy = vi
+      .spyOn(processModule, "ProcessManager")
+      // @ts-expect-error — mock constructor for testing
+      .mockImplementation(() => mockProcessManager);
   });
 
-  it("--target <name> prints process management message", async () => {
+  it("--target <name> calls ProcessManager.stop()", async () => {
     loadConfigSpy.mockReturnValue(baseConfig(MOCK_TARGETS));
-    const { stdout, exitCode } = await runWithArgs(["stop", "--target", "web"]);
+    mockProcessManager.stop.mockResolvedValue(undefined);
+    const { exitCode } = await runWithArgs(["stop", "--target", "web"]);
 
-    // Should print honest message about process management not being available
-    expect(stdout).toMatch(/process management|not yet implemented/i);
+    // Should call ProcessManager.stop with the target name
+    expect(processMgrSpy).toHaveBeenCalledTimes(1);
+    expect(mockProcessManager.stop).toHaveBeenCalledWith("web");
     expect(exitCode).toBe(0);
 
-    // Runner should NOT be created (cross-process stop doesn't work yet)
+    // Runner should NOT be created (cross-process stop uses ProcessManager)
     expect(runnerSpy).not.toHaveBeenCalled();
   });
 
-  it("--all prints process management message", async () => {
+  it("--all calls ProcessManager.stop() for each configured target", async () => {
     loadConfigSpy.mockReturnValue(baseConfig(MOCK_TARGETS));
-    const { stdout, exitCode } = await runWithArgs(["stop", "--all"]);
+    mockProcessManager.stop.mockResolvedValue(undefined);
+    const { exitCode } = await runWithArgs(["stop", "--all"]);
 
-    // Should print honest message about process management not being available
-    expect(stdout).toMatch(/process management|not yet implemented/i);
+    // Should call ProcessManager.stop for each configured target
+    expect(processMgrSpy).toHaveBeenCalledTimes(1);
+    expect(mockProcessManager.stop).toHaveBeenCalledTimes(2);
+    expect(mockProcessManager.stop).toHaveBeenCalledWith("web");
+    expect(mockProcessManager.stop).toHaveBeenCalledWith("api");
     expect(exitCode).toBe(0);
 
-    // Runner should NOT be created (cross-process stop doesn't work yet)
+    // Runner should NOT be created (cross-process stop uses ProcessManager)
     expect(runnerSpy).not.toHaveBeenCalled();
   });
 

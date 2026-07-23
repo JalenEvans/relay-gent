@@ -13,6 +13,7 @@ import type { Parser } from "./domain/parser/parser.interface";
 import { computeIdentity } from "./domain/record/record-identity";
 import type { Record as RelayRecord } from "./domain/record/record.schema";
 import { registry } from "./parsers";
+import { ProcessManager } from "./process";
 import { StateStore } from "./state/store";
 
 // ============================================================
@@ -256,9 +257,22 @@ export function createCli(): Command {
         }
 
         if (targetName || all) {
-          process.stdout.write(
-            "Process management is not yet implemented — coming in the Process epic\n",
-          );
+          const pm = new ProcessManager(join(homedir(), ".relay-gent", "targets"));
+
+          if (targetName) {
+            await pm.stop(targetName);
+            process.stdout.write(`Stopped watcher for target: ${targetName}\n`);
+          } else if (all) {
+            const names = Object.keys(config.targets);
+            for (const name of names) {
+              try {
+                await pm.stop(name);
+                process.stdout.write(`Stopped watcher for target: ${name}\n`);
+              } catch {
+                // Target wasn't running — skip
+              }
+            }
+          }
           exitProgram(0);
         } else {
           const names = Object.keys(config.targets);

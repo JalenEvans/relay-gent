@@ -307,10 +307,11 @@ describe("stop command", () => {
     expect(exitCode).toBe(1);
   });
 
-  it("shows --all status message when no targets configured", () => {
+  it("--all exits successfully when no targets configured", () => {
     removeConfig();
     const { stdout, exitCode } = runCli(["stop", "--all"]);
-    expect(stdout).toContain("Process management is not yet implemented");
+    // Should no longer show the "not yet implemented" stub message
+    expect(stdout).not.toContain("not yet implemented");
     expect(exitCode).toBe(0);
   });
 });
