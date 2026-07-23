@@ -294,7 +294,7 @@ describe("Runner", () => {
       const runner = new Runner(config, parser, adapter, tracker, store);
 
       // Spy on console.error to verify the error is logged
-      const errorSpy = spyOn(console, "error");
+      const errorSpy = spyOn(console, "error").mockImplementation(() => {});
 
       // Must NOT throw — error is caught and logged internally
       await expect(runner.onFileChange(missingPath)).resolves.toBeUndefined();
@@ -439,7 +439,7 @@ describe("Runner", () => {
         },
       };
 
-      const errorSpy = spyOn(console, "error");
+      const errorSpy = spyOn(console, "error").mockImplementation(() => {});
 
       const runner = new Runner(config, throwingParser, mockAdapter, tracker, store);
       await expect(runner.onFileChange(filePath)).resolves.toBeUndefined();
@@ -474,7 +474,7 @@ describe("Runner", () => {
         ready: async () => true,
       };
 
-      const errorSpy = spyOn(console, "error");
+      const errorSpy = spyOn(console, "error").mockImplementation(() => {});
 
       const runner = new Runner(config, producingParser, throwingAdapter, tracker, store);
       await expect(runner.onFileChange(filePath)).resolves.toBeUndefined();
@@ -505,7 +505,7 @@ describe("Runner", () => {
         new Error("filter failed"),
       );
 
-      const errorSpy = spyOn(console, "error");
+      const errorSpy = spyOn(console, "error").mockImplementation(() => {});
 
       const runner = new Runner(config, producingParser, mockAdapter, tracker, store);
       await expect(runner.onFileChange(filePath)).resolves.toBeUndefined();
@@ -659,7 +659,7 @@ describe("Runner", () => {
         ready: async () => true,
       };
 
-      const errorSpy = spyOn(console, "error");
+      const errorSpy = spyOn(console, "error").mockImplementation(() => {});
 
       const runner = new Runner(config, parser, adapter, tracker, store);
 

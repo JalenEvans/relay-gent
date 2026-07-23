@@ -21,6 +21,8 @@ export class RawCommandAdapter implements Adapter {
     // Spawn sh -c <command> with stdin pipe
     const proc = Bun.spawn(["sh", "-c", (ctx as { command: string }).command], {
       stdin: "pipe",
+      stdout: "ignore",
+      stderr: "ignore",
     });
 
     // Write formatted text to stdin
