@@ -96,6 +96,60 @@ export class ProcessManager {
     await rm(join(this.baseDir, name), { recursive: true, force: true });
   }
 
+  /**
+   * Read the last N lines from the target's log file.
+   * Defaults to 50 lines. Returns empty string if no log file.
+   */
+  async readLog(name: string, lines = 50): Promise<string> {
+    const logPath = join(this.baseDir, name, "log");
+    try {
+      const content = await readFile(logPath, "utf-8");
+      const allLines = content.split("\n");
+      // Remove trailing empty line from split
+      if (allLines.length > 0 && allLines[allLines.length - 1] === "") {
+        allLines.pop();
+      }
+      const lastLines = allLines.slice(Math.max(0, allLines.length - lines));
+      return lastLines.join("\n") + (lastLines.length > 0 ? "\n" : "");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        return "";
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Clear the target's log file.
+   * No-op if the log file doesn't exist.
+   */
+  async clearLog(name: string): Promise<void> {
+    const logPath = join(this.baseDir, name, "log");
+    await writeFile(logPath, "", "utf-8");
+  }
+
+  /**
+   * Read logs from all targets, concatenated with headers.
+   * Each section: "=== targetName ===\n" + logContent + "\n"
+   */
+  async readAllLogs(linesPerTarget = 50): Promise<string> {
+    let entries: string[];
+    try {
+      entries = await readdir(this.baseDir);
+    } catch {
+      return "";
+    }
+
+    const sections: string[] = [];
+    for (const name of entries.sort()) {
+      const logContent = await this.readLog(name, linesPerTarget);
+      if (logContent) {
+        sections.push(`=== ${name} ===\n${logContent}`);
+      }
+    }
+    return sections.join("\n");
+  }
+
   isAlive(pid: number): boolean {
     try {
       process.kill(pid, 0);

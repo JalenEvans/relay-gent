@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { appendFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { RawCommandAdapter } from "./adapters";
@@ -42,6 +42,26 @@ function resolveAdapter(name: string): Adapter | undefined {
 }
 
 // ============================================================
+// Logging — write log entries to the target's log file.
+// Uses sync I/O to ensure messages are written even during
+// shutdown.
+// ============================================================
+
+function logMessage(
+  name: string,
+  message: string,
+  level: "INFO" | "WARN" | "ERROR" = "INFO",
+): void {
+  const timestamp = new Date().toISOString();
+  const logPath = join(homedir(), ".relay-gent", "targets", name, "log");
+  try {
+    appendFileSync(logPath, `[${timestamp}] ${level}: ${message}\n`);
+  } catch {
+    // Silently ignore logging failures
+  }
+}
+
+// ============================================================
 // Public API — exported so the module can be imported for
 // testing and executed directly via import.meta.main.
 // ============================================================
@@ -65,6 +85,8 @@ export async function run(targetName: string): Promise<void> {
   const target = config.targets[targetName];
   if (!target) throw new Error(`target '${targetName}' not found in configuration`);
 
+  logMessage(targetName, "target configuration loaded");
+
   // 3. Ensure state/log directory exists (same path StateStore uses)
   const stateDir = join(homedir(), ".relay-gent", "targets", targetName);
   mkdirSync(stateDir, { recursive: true });
@@ -81,11 +103,13 @@ export async function run(targetName: string): Promise<void> {
 
   // 6. Register SIGTERM handler for graceful shutdown
   process.on("SIGTERM", async () => {
+    logMessage(targetName, "received SIGTERM, shutting down gracefully");
     await runner.stop();
     process.exit(0);
   });
 
   // 7. Start runner in foreground mode
+  logMessage(targetName, "starting watcher");
   try {
     await runner.start({ foreground: true });
   } catch (err) {

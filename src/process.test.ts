@@ -42,6 +42,10 @@ function statePath(baseDir: string, name: string): string {
   return join(baseDir, name, "state.json");
 }
 
+function logPath(baseDir: string, name: string): string {
+  return join(baseDir, name, "log");
+}
+
 // ------------------------------------------------------------------
 // 1. start() — target directory creation and PID file management
 // ------------------------------------------------------------------
@@ -488,5 +492,167 @@ describe("Runner Worker — run()", () => {
 
     consoleErrorSpy.mockRestore();
     exitSpy.mockRestore();
+  });
+});
+
+// ============================================================
+// 8. Log Management — readLog, clearLog, readAllLogs
+// ============================================================
+// API:
+//   readLog(name, lines?)       → last N lines from target log
+//   clearLog(name)              → truncate target log file
+//   readAllLogs(linesPerTarget?) → all logs with target headers
+//
+// Log file is stored at <baseDir>/<name>/log with format:
+//   [TIMESTAMP] LEVEL: message
+// ============================================================
+
+describe("ProcessManager — Log Management", () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await createTmpDir();
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  // ----------------------------------------------------------
+  // 8a. readLog() — basic content retrieval
+  // ----------------------------------------------------------
+
+  it("readLog() returns log content", async () => {
+    const manager = new ProcessManager(tmpDir);
+
+    // Create target directory and write a log file
+    await mkdir(targetDir(tmpDir, "test-target"), { recursive: true });
+    const lines = [
+      "[2024-06-01T10:00:00.000Z] INFO: starting up",
+      "[2024-06-01T10:00:01.000Z] INFO: file changed: ./src/index.ts",
+      "[2024-06-01T10:00:02.000Z] WARN: parse error on line 42",
+      "[2024-06-01T10:00:03.000Z] INFO: delivered 3 records",
+    ];
+    await writeFile(logPath(tmpDir, "test-target"), lines.join("\n") + "\n", "utf-8");
+
+    const content = await manager.readLog("test-target");
+
+    expect(content).toBe(lines.join("\n") + "\n");
+  });
+
+  // ----------------------------------------------------------
+  // 8b. readLog() — last N lines
+  // ----------------------------------------------------------
+
+  it("readLog() returns last N lines", async () => {
+    const manager = new ProcessManager(tmpDir);
+
+    // Create target directory
+    await mkdir(targetDir(tmpDir, "test-target"), { recursive: true });
+
+    // Write 100 lines
+    const totalLines = 100;
+    const lines: string[] = [];
+    for (let i = 1; i <= totalLines; i++) {
+      lines.push(`[2024-06-01T10:00:00.000Z] INFO: log line ${i}`);
+    }
+    await writeFile(logPath(tmpDir, "test-target"), lines.join("\n") + "\n", "utf-8");
+
+    const lastLinesCount = 50;
+    const content = await manager.readLog("test-target", lastLinesCount);
+
+    // Should only return the last 50 lines
+    const resultLines = content.trimEnd().split("\n");
+    expect(resultLines).toHaveLength(lastLinesCount);
+    expect(resultLines[0]).toContain("log line 51");
+    expect(resultLines[resultLines.length - 1]).toContain("log line 100");
+  });
+
+  // ----------------------------------------------------------
+  // 8c. readLog() — missing log file
+  // ----------------------------------------------------------
+
+  it("readLog() returns empty string when log file doesn't exist", async () => {
+    const manager = new ProcessManager(tmpDir);
+
+    // Create target directory but no log file
+    await mkdir(targetDir(tmpDir, "test-target"), { recursive: true });
+
+    const content = await manager.readLog("test-target");
+
+    expect(content).toBe("");
+  });
+
+  // ----------------------------------------------------------
+  // 8d. clearLog() — wipes the log file
+  // ----------------------------------------------------------
+
+  it("clearLog() wipes the log file", async () => {
+    const manager = new ProcessManager(tmpDir);
+
+    // Create target directory with log content
+    await mkdir(targetDir(tmpDir, "test-target"), { recursive: true });
+    await writeFile(
+      logPath(tmpDir, "test-target"),
+      "[2024-06-01T10:00:00.000Z] INFO: some log data\n",
+      "utf-8",
+    );
+
+    await manager.clearLog("test-target");
+
+    // File should still exist but be empty
+    const content = await readFile(logPath(tmpDir, "test-target"), "utf-8");
+    expect(content).toBe("");
+  });
+
+  // ----------------------------------------------------------
+  // 8e. clearLog() — missing log file
+  // ----------------------------------------------------------
+
+  it("clearLog() is a no-op when no log file exists", async () => {
+    const manager = new ProcessManager(tmpDir);
+
+    // Create target directory but no log file
+    await mkdir(targetDir(tmpDir, "test-target"), { recursive: true });
+
+    // Should not throw
+    await expect(manager.clearLog("test-target")).resolves.toBeUndefined();
+  });
+
+  // ----------------------------------------------------------
+  // 8f. readAllLogs() — concatenated logs across targets
+  // ----------------------------------------------------------
+
+  it("readAllLogs() returns concatenated logs with target headers", async () => {
+    const manager = new ProcessManager(tmpDir);
+
+    // Create two targets with log content
+    await mkdir(targetDir(tmpDir, "target-a"), { recursive: true });
+    await mkdir(targetDir(tmpDir, "target-b"), { recursive: true });
+
+    const logA = [
+      "[2024-06-01T10:00:00.000Z] INFO: target-a line 1",
+      "[2024-06-01T10:00:01.000Z] INFO: target-a line 2",
+    ].join("\n") + "\n";
+
+    const logB = [
+      "[2024-06-01T10:00:00.000Z] ERROR: target-b error",
+      "[2024-06-01T10:00:01.000Z] INFO: target-b recovery",
+    ].join("\n") + "\n";
+
+    await writeFile(logPath(tmpDir, "target-a"), logA, "utf-8");
+    await writeFile(logPath(tmpDir, "target-b"), logB, "utf-8");
+
+    const content = await manager.readAllLogs();
+
+    // Should contain headers for each target
+    expect(content).toContain("=== target-a ===");
+    expect(content).toContain("=== target-b ===");
+
+    // Should contain the log content for each target
+    expect(content).toContain("target-a line 1");
+    expect(content).toContain("target-a line 2");
+    expect(content).toContain("target-b error");
+    expect(content).toContain("target-b recovery");
   });
 });
