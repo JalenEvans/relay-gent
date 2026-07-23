@@ -84,9 +84,15 @@ Removes stale target state directories under `~/.relay-gent/targets/`.
 
 View or clear per-target logs stored at `~/.relay-gent/targets/<name>/log`.
 
-- Without flags: lists all targets that have log files
+- Without flags: prints concatenated log content from all targets that have log data, each preceded by a `=== targetName ===` header
 - `--target <name>`: prints the log content for that target
 - `--target <name> --clear`: truncates the log file
+
+### --version
+
+`relay-gent --version`
+
+Prints the current version of the CLI (implicit from Commander, based on the `version` field in `package.json`).
 
 ## Exit Codes
 

@@ -4,12 +4,25 @@ import { join } from "node:path";
 import * as toml from "toml";
 import { type Config, ConfigSchema } from "../domain/config/config.schema";
 
+/** Options for loadConfig(). */
 export interface LoadConfigOptions {
+  /** Path to the TOML config file (default: ~/.relay-gent/config.toml) */
   configPath?: string;
+  /** Environment variable overrides for testing */
   envOverrides?: Record<string, string>;
+  /** CLI flag overrides (highest precedence) */
   cliOverrides?: Partial<Config>;
 }
 
+/**
+ * Load and validate configuration via a three-tier merge:
+ * 1. TOML config file (lowest priority, missing file is not an error)
+ * 2. Environment variable overrides (RELAY_GENT_*)
+ * 3. CLI flag overrides (highest priority)
+ *
+ * Also applies defaults (defaultAdapter, default parser as "json-lines")
+ * before Zod validation. See docs/architecture/overview.md for architecture details.
+ */
 export function loadConfig(options?: LoadConfigOptions): Config {
   const {
     configPath = join(homedir(), ".relay-gent", "config.toml"),

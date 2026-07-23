@@ -103,4 +103,6 @@ Two domain-specific error types:
 - `SchemaValidationError` - wraps Zod validation failures with schema name, issues array, and raw input
 - `IdentityComputeError` - raised when record identity computation fails (should never happen with valid records)
 
-See [Record System](record-system.md) and [Plugin System](plugin-system.md) for implementation details.
+Errors during the pipeline (file read, parse, delta, deliver) are caught and logged by the `Runner.onFileChange()` method and never rethrown, ensuring the watcher continues operating on subsequent file changes.
+
+See [Record System](record-system.md) and [Plugin System](plugin-system.md) for implementation details. For a full reference on error types and handling patterns, see [Error Handling Reference](../reference/error-handling.md).

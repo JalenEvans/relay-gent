@@ -23,11 +23,40 @@ bun test
 bun run build
 ```
 
+## Usage Examples
+
+```bash
+# Show status dashboard
+relay-gent status
+
+# One-shot parse and deliver
+relay-gent once ./data.ndjson --target my-app
+
+# Watch a file continuously
+relay-gent watch ./data.ndjson --target my-app
+
+# Run watcher in background (daemonize)
+relay-gent watch ./data.ndjson --target my-app --background
+
+# View target logs
+relay-gent log --target my-app
+
+# Stop a running watcher
+relay-gent stop --target my-app
+
+# Stop all watchers
+relay-gent stop --all
+
+# Clean stale state directories
+relay-gent clean --force
+```
+
 ## Supported Formats
 
 | Parser | Description |
 |--------|-------------|
 | `json-lines` | Newline-delimited JSON (each line = one record) |
+| `typescript` | TypeScript file parsing (planned) |
 
 More parsers coming. See [Adding Parsers](docs/development/adding-parsers.md).
 
