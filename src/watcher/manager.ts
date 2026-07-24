@@ -115,6 +115,12 @@ export class WatcherManager {
       resolvedOptions.respectGitignore = true;
     }
 
+    // Validate path length before passing to chokidar (OS max is typically 4096)
+    const MAX_PATH_LENGTH = 4096;
+    if (filePath.length > MAX_PATH_LENGTH) {
+      throw new Error(`Path too long: ${filePath.length} characters (max ${MAX_PATH_LENGTH})`);
+    }
+
     // Build chokidar options
     const chokidarOptions: chokidar.ChokidarOptions = {
       ignoreInitial: true,

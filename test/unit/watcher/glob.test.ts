@@ -254,14 +254,11 @@ describe("Invalid patterns", () => {
     }).not.toThrow();
   });
 
-  test("watchFile handles very long path gracefully", async () => {
+  test("watchFile throws on very long path", async () => {
     const { WatcherManager } = await import("../../../src/watcher");
     const manager = new WatcherManager();
-    const longPath = "/tmp/" + "a".repeat(500) + "/file.log";
+    const longPath = "/tmp/" + "a".repeat(4096) + "/file.log";
 
-    // PASSES: shouldn't throw
-    expect(async () => {
-      await manager.watchFile(longPath);
-    }).not.toThrow();
+    await expect(manager.watchFile(longPath)).rejects.toThrow("Path too long");
   });
 });

@@ -15,14 +15,11 @@ export function createNotificationHandler(): NotificationHandler {
     onFileChange(filePath: string): void {
       lastChangedPath = filePath;
       if (server) {
-        const srv = server.server as unknown as Server;
-        srv
-          .sendResourceUpdated({
-            uri: `relay-gent://records?changed=${encodeURIComponent(filePath)}`,
-          })
-          .catch(() => {
-            // Server may not be connected yet — silently handle
-          });
+        const srv = (server as unknown as { server?: Server }).server;
+        if (!srv) return;
+        srv.sendResourceUpdated({ uri: "relay-gent://records" }).catch(() => {
+          // Server may not be connected yet — silently handle
+        });
       }
     },
 

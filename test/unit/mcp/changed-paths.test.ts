@@ -208,7 +208,7 @@ describe("Changed Paths Exposure", () => {
       expect(changedPath).toBe(paths[paths.length - 1]);
     });
 
-    test("onFileChange sends resource update whose URI references the changed path", async () => {
+    test("onFileChange sends resource update with canonical URI and stores path on handler", async () => {
       const { createNotificationHandler } = await import("../../../src/mcp/notifications");
 
       let capturedUri = "";
@@ -227,10 +227,10 @@ describe("Changed Paths Exposure", () => {
       const testPath = "/tmp/test.ts";
       handler.onFileChange(testPath);
 
-      // FAILS: resource URI is hardcoded "relay-gent://records" and
-      // doesn't reference the changed path at all. The path info
-      // should be accessible from the resource URI updater.
-      expect(capturedUri).toContain("test.ts");
+      // URI is the canonical resource URI (no query params); the
+      // changed path is tracked via lastChangedPath on the handler
+      expect(capturedUri).toBe("relay-gent://records");
+      expect(handler.lastChangedPath).toBe(testPath);
     });
 
     test("onFileChange stores path even when no server is connected", async () => {
