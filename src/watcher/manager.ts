@@ -7,6 +7,7 @@ export class WatcherManager {
   private callbacks = new Map<string, FileChangeCallback[]>();
   private options = new Map<string, WatcherOptions>();
   private onFileChangeCallback?: FileChangeCallback;
+  private debounceTimers = new Map<string, NodeJS.Timeout>();
 
   /** Detect if a path string contains glob wildcard characters */
   static isGlobPattern(path: string): boolean {
@@ -21,6 +22,15 @@ export class WatcherManager {
     if (!extensions || extensions.length === 0) return true;
     const ext = path.toLowerCase();
     return extensions.some((e) => ext.endsWith(e.toLowerCase()));
+  }
+
+  /** Clear a debounce timer for a given path, if one exists */
+  private clearDebounceTimer(path: string): void {
+    const timer = this.debounceTimers.get(path);
+    if (timer) {
+      clearTimeout(timer);
+      this.debounceTimers.delete(path);
+    }
   }
 
   /** Auto-detect WatcherOptions based on the path when no explicit options provided */
@@ -39,26 +49,40 @@ export class WatcherManager {
 
     // Auto-detect when no explicit options are provided
     const resolvedOptions: WatcherOptions = options ?? WatcherManager.detectOptions(filePath);
+    if (resolvedOptions.debounceMs === undefined) {
+      resolvedOptions.debounceMs = 300;
+    }
+
+    const debounceMs = resolvedOptions.debounceMs;
 
     const watcher = chokidar.watch(filePath, {
       ignoreInitial: true,
       awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 100 },
     });
 
-    watcher.on("change", (path: string) => {
+    const debounceHandler = (event: string, path: string) => {
       if (!WatcherManager.shouldIncludeFile(path, resolvedOptions.extensions)) return;
-      this.onFileChangeCallback?.("change", path);
-    });
 
-    watcher.on("add", (path: string) => {
-      if (!WatcherManager.shouldIncludeFile(path, resolvedOptions.extensions)) return;
-      this.onFileChangeCallback?.("add", path);
-    });
+      if (debounceMs === 0) {
+        // Passthrough - no debounce
+        this.onFileChangeCallback?.(event, path);
+        return;
+      }
 
-    watcher.on("unlink", (path: string) => {
-      if (!WatcherManager.shouldIncludeFile(path, resolvedOptions.extensions)) return;
-      this.onFileChangeCallback?.("unlink", path);
-    });
+      // Debounce: clear existing timer for this path, set new one
+      this.clearDebounceTimer(path);
+      this.debounceTimers.set(
+        path,
+        setTimeout(() => {
+          this.debounceTimers.delete(path);
+          this.onFileChangeCallback?.(event, path);
+        }, debounceMs),
+      );
+    };
+
+    watcher.on("change", (path: string) => debounceHandler("change", path));
+    watcher.on("add", (path: string) => debounceHandler("add", path));
+    watcher.on("unlink", (path: string) => debounceHandler("unlink", path));
 
     this.watchers.set(filePath, watcher);
     this.options.set(filePath, resolvedOptions);
@@ -69,10 +93,12 @@ export class WatcherManager {
       startedAt: new Date().toISOString(),
       origin: resolvedOptions.origin,
       pattern: resolvedOptions.pattern,
+      debounceMs: resolvedOptions.debounceMs,
     });
   }
 
   async unwatchFile(filePath: string): Promise<void> {
+    this.clearDebounceTimer(filePath);
     const watcher = this.watchers.get(filePath);
     if (watcher) {
       await watcher.close();
@@ -96,6 +122,10 @@ export class WatcherManager {
   }
 
   async unwatchAll(): Promise<void> {
+    // Clear all debounce timers
+    for (const [path] of this.debounceTimers) {
+      this.clearDebounceTimer(path);
+    }
     for (const [path] of this.watchers) {
       await this.unwatchFile(path);
     }

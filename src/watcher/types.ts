@@ -6,6 +6,7 @@ export interface WatcherOptions {
   origin?: "single-file" | "glob" | "directory";
   pattern?: string;
   extensions?: string[];
+  debounceMs?: number;
 }
 
 export interface WatcherState {
@@ -14,4 +15,5 @@ export interface WatcherState {
   startedAt: string;
   origin?: "single-file" | "glob" | "directory";
   pattern?: string;
+  debounceMs?: number;
 }
