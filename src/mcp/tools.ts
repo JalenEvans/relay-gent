@@ -14,12 +14,22 @@ export function registerTools(
     {
       description: "Start watching a file for changes and relay its contents",
       inputSchema: z.object({
-        path: z.string().describe("Absolute path to the file to watch"),
+        path: z.string().describe("Absolute path or glob pattern to watch"),
+        options: z
+          .object({
+            origin: z.enum(["single-file", "glob", "directory"]).optional(),
+            pattern: z.string().optional(),
+            extensions: z.array(z.string()).optional(),
+            debounceMs: z.number().int().min(0).optional(),
+            respectGitignore: z.boolean().optional(),
+          })
+          .optional()
+          .describe("Watch configuration options"),
       }),
     },
-    async ({ path }) => {
+    async ({ path, options }) => {
       try {
-        await watcher.watchFile(path);
+        await watcher.watchFile(path, options);
         return {
           content: [{ type: "text" as const, text: `Watching: ${path}` }],
         };
@@ -100,6 +110,7 @@ export function registerTools(
                 watchedPaths,
                 watcherCount: watchedPaths.length,
                 totalDelivered,
+                recentChanges: watcher.getRecentChanges().slice(-10),
               },
               null,
               2,
