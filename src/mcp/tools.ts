@@ -21,6 +21,7 @@ export function registerTools(
             pattern: z.string().optional(),
             extensions: z.array(z.string()).optional(),
             debounceMs: z.number().int().min(0).optional(),
+            respectGitignore: z.boolean().optional(),
           })
           .optional()
           .describe("Watch configuration options"),
