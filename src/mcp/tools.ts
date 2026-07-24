@@ -19,6 +19,8 @@ export function registerTools(
           .object({
             origin: z.enum(["single-file", "glob", "directory"]).optional(),
             pattern: z.string().optional(),
+            extensions: z.array(z.string()).optional(),
+            debounceMs: z.number().int().min(0).optional(),
           })
           .optional()
           .describe("Watch configuration options"),
