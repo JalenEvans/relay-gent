@@ -13,6 +13,16 @@ export class WatcherManager {
     return /[*?[\]{}]/.test(path);
   }
 
+  /**
+   * Check if a file path should be included based on extension filter.
+   * Case-insensitive. No filter or empty filter = include all.
+   */
+  static shouldIncludeFile(path: string, extensions?: string[]): boolean {
+    if (!extensions || extensions.length === 0) return true;
+    const ext = path.toLowerCase();
+    return extensions.some((e) => ext.endsWith(e.toLowerCase()));
+  }
+
   /** Auto-detect WatcherOptions based on the path when no explicit options provided */
   private static detectOptions(path: string): WatcherOptions {
     if (WatcherManager.isGlobPattern(path)) {
@@ -36,14 +46,17 @@ export class WatcherManager {
     });
 
     watcher.on("change", (path: string) => {
+      if (!WatcherManager.shouldIncludeFile(path, resolvedOptions.extensions)) return;
       this.onFileChangeCallback?.("change", path);
     });
 
     watcher.on("add", (path: string) => {
+      if (!WatcherManager.shouldIncludeFile(path, resolvedOptions.extensions)) return;
       this.onFileChangeCallback?.("add", path);
     });
 
     watcher.on("unlink", (path: string) => {
+      if (!WatcherManager.shouldIncludeFile(path, resolvedOptions.extensions)) return;
       this.onFileChangeCallback?.("unlink", path);
     });
 

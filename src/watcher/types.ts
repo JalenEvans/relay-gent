@@ -5,6 +5,7 @@ export type FileChangeCallback = (event: string, path: string) => void;
 export interface WatcherOptions {
   origin?: "single-file" | "glob" | "directory";
   pattern?: string;
+  extensions?: string[];
 }
 
 export interface WatcherState {
