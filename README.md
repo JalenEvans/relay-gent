@@ -12,14 +12,28 @@ When a watched file changes, relay-gent re-parses its contents, stores the updat
 File System --> Watcher --> Parser --> Record[] --> MCP Server --> Agent
 ```
 
-## Quick Start
+## Installation
+
+### Prerequisites
+
+- [Bun](https://bun.sh/) v1.0+ — relay-gent is built with Bun and requires it at runtime
+
+### From Source
 
 ```bash
-# Install
+git clone https://github.com/JalenEvans/relay-gent
+cd relay-gent
 bun install
+npm link
+```
 
-# Run tests
-bun test
+After `npm link`, the `relay-gent` command is available globally on your system (npm registers bin entries in its global prefix directory). Run `relay-gent status` to verify.
+
+> **Note:** `bun link` is not used here — Bun's `link` command is for library development (linking packages into other projects' `node_modules`), not for exposing CLI binaries globally. Use `npm link` instead, which correctly symlinks the `relay-gent` binary to a directory on your PATH.
+
+### Standalone Binary (no Bun required)
+
+Compile relay-gent into a single native binary with the Bun runtime embedded:
 
 # Typecheck + build
 bun run build
