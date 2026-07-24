@@ -23,18 +23,4 @@ describe("MCP Resources", () => {
     // Should not throw
     registerResources(server, watcher, store);
   });
-
-  test("resource URIs are correct", () => {
-    const expectedUris = [
-      "relay-gent://records",
-      "relay-gent://records/new",
-      "relay-gent://records/changed",
-      "relay-gent://status",
-    ];
-    expect(expectedUris).toHaveLength(4);
-    expect(expectedUris).toContain("relay-gent://records");
-    expect(expectedUris).toContain("relay-gent://records/new");
-    expect(expectedUris).toContain("relay-gent://records/changed");
-    expect(expectedUris).toContain("relay-gent://status");
-  });
 });

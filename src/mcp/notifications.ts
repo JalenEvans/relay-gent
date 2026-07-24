@@ -1,3 +1,4 @@
+import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 export interface NotificationHandler {
@@ -10,18 +11,12 @@ export function createNotificationHandler(): NotificationHandler {
 
   return {
     onFileChange(filePath: string): void {
-      // Send notification if we have a server connection
       if (server) {
         try {
-          // Attempt to send resource updated notification
-          // Uses the low-level server API from the McpServer instance
-          // biome-ignore lint/suspicious/noExplicitAny: accessing low-level Server from McpServer wrapper
-          const srv = (server as any).server;
-          if (srv && typeof srv.sendResourceUpdated === "function") {
-            srv.sendResourceUpdated("relay-gent://records");
-          }
+          const srv = server.server as unknown as Server;
+          srv.sendResourceUpdated({ uri: "relay-gent://records" });
         } catch {
-          // Silently handle — server may not be connected yet
+          // Server may not be connected yet — silently handle
         }
       }
     },

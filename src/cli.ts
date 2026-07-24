@@ -28,6 +28,8 @@ export function createCli(): Command {
         exitProgram(1);
       }
     });
+
+  // Mark mcp as the default command
   (mcpCmd as unknown as Record<string, boolean>)._isDefault = true;
 
   return program;

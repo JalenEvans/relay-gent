@@ -60,16 +60,10 @@ export function registerTools(
   server.registerTool(
     "get_records",
     {
-      description: "Get all tracked records (new, changed, unchanged)",
-      inputSchema: z.object({
-        filter: z
-          .enum(["all", "new", "changed"])
-          .optional()
-          .default("all")
-          .describe("Filter records by status"),
-      }),
+      description: "Get all tracked records",
+      inputSchema: z.object({}),
     },
-    async ({ filter }) => {
+    async () => {
       const records = store.getAllRecords();
       const entries = Object.entries(records);
       return {
@@ -77,7 +71,7 @@ export function registerTools(
           {
             type: "text" as const,
             text: JSON.stringify(
-              { count: entries.length, filter, records: entries.slice(0, 100) },
+              { count: entries.length, records: entries.slice(0, 100) },
               null,
               2,
             ),
