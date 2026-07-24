@@ -12,12 +12,10 @@ export function createNotificationHandler(): NotificationHandler {
   return {
     onFileChange(filePath: string): void {
       if (server) {
-        try {
-          const srv = server.server as unknown as Server;
-          srv.sendResourceUpdated({ uri: "relay-gent://records" });
-        } catch {
+        const srv = server.server as unknown as Server;
+        srv.sendResourceUpdated({ uri: "relay-gent://records" }).catch(() => {
           // Server may not be connected yet — silently handle
-        }
+        });
       }
     },
 

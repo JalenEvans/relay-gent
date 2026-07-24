@@ -21,6 +21,11 @@ export function createApp(name = "relay-gent", version = "0.1.0"): AppComponents
   // Wire the notification handler to the server
   notificationHandler.setServer(server);
 
+  // Wire watcher events to notification handler
+  watcher.setOnFileChange((_event: string, path: string) => {
+    notificationHandler.onFileChange(path);
+  });
+
   // Register tools and resources — they receive watcher + store
   registerTools(server, watcher, store);
   registerResources(server, watcher, store);

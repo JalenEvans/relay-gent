@@ -47,6 +47,13 @@ export function registerResources(
               watchedPaths: watcher.getWatchedPaths(),
               watching: watcher.getWatchedPaths().length,
               totalDelivered: store.totalDelivered,
+              watches: watcher.getAllStates().map((s) => ({
+                path: s.path,
+                active: s.active,
+                origin: s.origin,
+                pattern: s.pattern,
+                startedAt: s.startedAt,
+              })),
             },
             null,
             2,
