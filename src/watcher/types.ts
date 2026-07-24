@@ -7,6 +7,7 @@ export interface WatcherOptions {
   pattern?: string;
   extensions?: string[];
   debounceMs?: number;
+  respectGitignore?: boolean;
 }
 
 export interface WatcherState {
@@ -16,4 +17,5 @@ export interface WatcherState {
   origin?: "single-file" | "glob" | "directory";
   pattern?: string;
   debounceMs?: number;
+  respectGitignore?: boolean;
 }

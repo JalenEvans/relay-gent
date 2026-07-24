@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import * as chokidar from "chokidar";
 import type { FileChangeCallback, WatcherOptions, WatcherState } from "./types.js";
 
@@ -44,6 +45,60 @@ export class WatcherManager {
     return { origin: "single-file", pattern: path };
   }
 
+  /**
+   * Parse .gitignore text content into an array of glob patterns.
+   * Skips comment lines (#) and blank lines.
+   * Converts common patterns:
+   *   "node_modules/" becomes glob match for any node_modules directory
+   *   "*.log" becomes glob match for any .log file
+   *   ".env" becomes glob match for any .env file
+   *   "build/" becomes glob match for any build directory
+   *   "!/keep.me" patterns are excluded (negation not supported yet)
+   */
+  static parseGitignore(content: string): string[] {
+    const patterns: string[] = [];
+    for (const line of content.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      // Skip negation patterns (for now)
+      if (trimmed.startsWith("!")) continue;
+
+      // Convert to glob pattern
+      let pattern = trimmed;
+      // Check if it was a directory pattern (trailing /)
+      const isDir = pattern.endsWith("/");
+      if (isDir) {
+        pattern = pattern.slice(0, -1); // remove trailing /
+      }
+      // Prepend **/ for non-anchored patterns
+      if (!pattern.startsWith("**/")) {
+        pattern = `**/${pattern}`;
+      }
+      // For directory patterns, append /**
+      if (isDir) {
+        pattern = `${pattern}/**`;
+      }
+      patterns.push(pattern);
+    }
+    return patterns;
+  }
+
+  /**
+   * Attempt to load and parse .gitignore from a directory.
+   * Returns empty array if no .gitignore file exists or read fails.
+   */
+  static async loadGitignore(watchPath: string): Promise<string[]> {
+    try {
+      const { readFile } = await import("node:fs/promises");
+      const gitignorePath = join(watchPath, ".gitignore");
+      const content = await readFile(gitignorePath, "utf-8");
+      return WatcherManager.parseGitignore(content);
+    } catch {
+      // ENOENT = no .gitignore, other errors = can't read
+      return [];
+    }
+  }
+
   async watchFile(filePath: string, options?: WatcherOptions): Promise<void> {
     if (this.watchers.has(filePath)) return;
 
@@ -53,12 +108,48 @@ export class WatcherManager {
       resolvedOptions.debounceMs = 300;
     }
 
-    const debounceMs = resolvedOptions.debounceMs;
+    // Default respectGitignore to true when not specified
+    if (resolvedOptions.respectGitignore === undefined) {
+      resolvedOptions.respectGitignore = true;
+    }
 
-    const watcher = chokidar.watch(filePath, {
+    // Build chokidar options
+    const chokidarOptions: chokidar.ChokidarOptions = {
       ignoreInitial: true,
       awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 100 },
-    });
+    };
+
+    // Handle .gitignore
+    if (resolvedOptions.respectGitignore) {
+      let dir: string;
+      if (resolvedOptions.origin === "directory" || filePath.endsWith("/")) {
+        dir = filePath.replace(/\/+$/, "");
+      } else if (filePath.includes("*")) {
+        // Glob pattern — extract base directory before the first wildcard
+        const starIndex = filePath.indexOf("*");
+        const lastSlash = filePath.lastIndexOf("/", starIndex);
+        dir = lastSlash >= 0 ? filePath.substring(0, lastSlash) : ".";
+      } else {
+        // Single file/directory path — check if it looks like a directory
+        const lastSlash = filePath.lastIndexOf("/");
+        const fileName = lastSlash >= 0 ? filePath.slice(lastSlash + 1) : filePath;
+        if (fileName.includes(".")) {
+          // Has a file extension → treat as file, use parent directory
+          dir = lastSlash >= 0 ? filePath.substring(0, lastSlash) || "." : ".";
+        } else {
+          // No extension → treat as a directory, use path directly
+          dir = filePath;
+        }
+      }
+      const ignorePatterns = await WatcherManager.loadGitignore(dir);
+      if (ignorePatterns.length > 0) {
+        chokidarOptions.ignored = ignorePatterns;
+      }
+    }
+
+    const debounceMs = resolvedOptions.debounceMs;
+
+    const watcher = chokidar.watch(filePath, chokidarOptions);
 
     const debounceHandler = (event: string, path: string) => {
       if (!WatcherManager.shouldIncludeFile(path, resolvedOptions.extensions)) return;
@@ -94,6 +185,7 @@ export class WatcherManager {
       origin: resolvedOptions.origin,
       pattern: resolvedOptions.pattern,
       debounceMs: resolvedOptions.debounceMs,
+      respectGitignore: resolvedOptions.respectGitignore,
     });
   }
 
