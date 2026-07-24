@@ -98,13 +98,13 @@ describe("createCli()", () => {
 });
 
 // ============================================================
-// 2. All 6 commands are registered
+// 2. All 7 commands are registered
 // ============================================================
 
 describe("registered commands", () => {
-  it("registers exactly 6 commands", () => {
+  it("registers exactly 7 commands", () => {
     const names = commandNames();
-    expect(names).toHaveLength(6);
+    expect(names).toHaveLength(7);
   });
 
   it("registers the 'status' command", () => {

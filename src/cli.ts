@@ -11,6 +11,7 @@ import type { TargetConfig } from "./domain/config/config.schema";
 import type { Parser } from "./domain/parser/parser.interface";
 import { computeIdentity } from "./domain/record/record-identity";
 import type { Record as RelayRecord } from "./domain/record/record.schema";
+import { startServer } from "./mcp/server.js";
 import { registry } from "./parsers";
 import { ProcessManager } from "./process";
 import { StateStore } from "./state/store";
@@ -397,6 +398,22 @@ export function createCli(): Command {
         }
 
         exitProgram(0);
+      } catch (error) {
+        if (error instanceof CommanderError) throw error;
+        process.stderr.write(`${String(error)}\n`);
+        exitProgram(1);
+      }
+    });
+
+  // --------------------------------------------------
+  // mcp
+  // --------------------------------------------------
+  program
+    .command("mcp")
+    .description("Start the MCP server (stdio transport)")
+    .action(async () => {
+      try {
+        await startServer();
       } catch (error) {
         if (error instanceof CommanderError) throw error;
         process.stderr.write(`${String(error)}\n`);
