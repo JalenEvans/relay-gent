@@ -167,14 +167,14 @@ describe("WatcherState with origin info", () => {
     expect(state?.pattern).toBe("*.log");
   });
 
-  test("getWatcherState returns state without origin when watching without options", async () => {
+  test("getWatcherState returns state with auto-detected origin when watching without options", async () => {
     const { WatcherManager } = await import("../../../src/watcher");
     const manager = new WatcherManager();
     await manager.watchFile("/tmp/test.log");
     const state = manager.getWatcherState("/tmp/test.log");
     expect(state).toBeDefined();
-    expect(state?.origin).toBeUndefined();
-    expect(state?.pattern).toBeUndefined();
+    expect(state?.origin).toBe("single-file");
+    expect(state?.pattern).toBe("/tmp/test.log");
   });
 });
 

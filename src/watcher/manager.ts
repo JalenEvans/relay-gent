@@ -8,8 +8,27 @@ export class WatcherManager {
   private options = new Map<string, WatcherOptions>();
   private onFileChangeCallback?: FileChangeCallback;
 
+  /** Detect if a path string contains glob wildcard characters */
+  static isGlobPattern(path: string): boolean {
+    return /[*?[\]{}]/.test(path);
+  }
+
+  /** Auto-detect WatcherOptions based on the path when no explicit options provided */
+  private static detectOptions(path: string): WatcherOptions {
+    if (WatcherManager.isGlobPattern(path)) {
+      return { origin: "glob", pattern: path };
+    }
+    if (path.endsWith("/")) {
+      return { origin: "directory", pattern: path };
+    }
+    return { origin: "single-file", pattern: path };
+  }
+
   async watchFile(filePath: string, options?: WatcherOptions): Promise<void> {
     if (this.watchers.has(filePath)) return;
+
+    // Auto-detect when no explicit options are provided
+    const resolvedOptions: WatcherOptions = options ?? WatcherManager.detectOptions(filePath);
 
     const watcher = chokidar.watch(filePath, {
       ignoreInitial: true,
@@ -29,14 +48,14 @@ export class WatcherManager {
     });
 
     this.watchers.set(filePath, watcher);
-    this.options.set(filePath, options ?? {});
+    this.options.set(filePath, resolvedOptions);
 
     this.states.set(filePath, {
       path: filePath,
       active: true,
       startedAt: new Date().toISOString(),
-      origin: options?.origin,
-      pattern: options?.pattern,
+      origin: resolvedOptions.origin,
+      pattern: resolvedOptions.pattern,
     });
   }
 
