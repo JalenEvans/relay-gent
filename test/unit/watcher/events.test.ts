@@ -25,24 +25,37 @@ describe("FileChangeCallback", () => {
     expect(typeof manager.getOnFileChange).toBe("function");
   });
 
-  test("setOnFileChange stores a callback function", async () => {
+  test("setOnFileChange stores a callback function that can be invoked", async () => {
     const { WatcherManager } = await import("../../../src/watcher");
     const manager = new WatcherManager();
-    const callback = (event: string, path: string) => {};
+    let called = false;
+    const callback = (event: string, path: string) => {
+      called = true;
+    };
     manager.setOnFileChange(callback);
     const stored = manager.getOnFileChange();
-    expect(stored).toBe(callback);
+    expect(typeof stored).toBe("function");
+    stored!("change", "/tmp/test.txt");
+    expect(called).toBe(true);
   });
 
   test("setOnFileChange overrides previous callback", async () => {
     const { WatcherManager } = await import("../../../src/watcher");
     const manager = new WatcherManager();
-    const cb1 = (event: string, path: string) => {};
-    const cb2 = (event: string, path: string) => {};
+    let captured: string | null = null;
+    const cb1 = (_event: string, _path: string) => {
+      captured = "cb1";
+    };
+    const cb2 = (_event: string, _path: string) => {
+      captured = "cb2";
+    };
     manager.setOnFileChange(cb1);
     manager.setOnFileChange(cb2);
-    expect(manager.getOnFileChange()).toBe(cb2);
-    expect(manager.getOnFileChange()).not.toBe(cb1);
+    const stored = manager.getOnFileChange();
+    expect(typeof stored).toBe("function");
+    stored!("change", "/tmp/test.txt");
+    // The second callback should be the active one
+    expect(captured!).toBe("cb2");
   });
 
   test("getOnFileChange returns undefined when no callback is set", async () => {

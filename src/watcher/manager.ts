@@ -9,6 +9,8 @@ export class WatcherManager {
   private options = new Map<string, WatcherOptions>();
   private onFileChangeCallback?: FileChangeCallback;
   private debounceTimers = new Map<string, NodeJS.Timeout>();
+  private recentChanges: string[] = [];
+  private static readonly MAX_RECENT_CHANGES = 100;
 
   /** Detect if a path string contains glob wildcard characters */
   static isGlobPattern(path: string): boolean {
@@ -213,6 +215,11 @@ export class WatcherManager {
     return Array.from(this.states.values());
   }
 
+  /** Get the most recently changed file paths */
+  getRecentChanges(): string[] {
+    return [...this.recentChanges];
+  }
+
   async unwatchAll(): Promise<void> {
     // Clear all debounce timers
     for (const [path] of this.debounceTimers) {
@@ -225,7 +232,16 @@ export class WatcherManager {
 
   /** Set the global file change callback */
   setOnFileChange(callback: FileChangeCallback): void {
-    this.onFileChangeCallback = callback;
+    this.onFileChangeCallback = (event: string, path: string) => {
+      // Track the changed path
+      this.recentChanges.push(path);
+      if (this.recentChanges.length > WatcherManager.MAX_RECENT_CHANGES) {
+        this.recentChanges = this.recentChanges.slice(
+          -Math.floor(WatcherManager.MAX_RECENT_CHANGES / 2),
+        );
+      }
+      callback(event, path);
+    };
   }
 
   /** Get the current file change callback (or undefined if none) */

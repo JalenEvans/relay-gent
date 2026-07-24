@@ -109,6 +109,7 @@ export function registerTools(
                 watchedPaths,
                 watcherCount: watchedPaths.length,
                 totalDelivered,
+                recentChanges: watcher.getRecentChanges().slice(-10),
               },
               null,
               2,
