@@ -1,13 +1,15 @@
 # relay-gent
 
-A plugin-based CLI tool that watches files for changes, parses them into typed records, and relays those records to coding agents.
+An MCP (Model Context Protocol) server that watches files for changes, parses them into typed records, and relays those records to AI coding agents.
 
 ## What It Does
 
-relay-gent sits between your file system and AI coding agents. It watches files, transforms their content into structured records using pluggable parsers, and delivers those records to external agents (opencode, claude, codex, or raw commands) via pluggable adapters.
+relay-gent runs as an MCP server over stdio transport. It exposes tools to watch files, query parsed records, and check status — designed for integration with Claude Code and other MCP-compatible agents.
+
+When a watched file changes, relay-gent re-parses its contents, stores the updated records, and sends a `sendResourceUpdated` notification to the connected MCP host.
 
 ```
-File System --> Watcher --> Parser --> Record[] --> Adapter --> Agent
+File System --> Watcher --> Parser --> Record[] --> MCP Server --> Agent
 ```
 
 ## Installation
@@ -33,66 +35,44 @@ After `npm link`, the `relay-gent` command is available globally on your system 
 
 Compile relay-gent into a single native binary with the Bun runtime embedded:
 
-```bash
-git clone https://github.com/JalenEvans/relay-gent
-cd relay-gent
-bun install
-bun build ./bin/relay-gent.ts --compile --outfile relay-gent
-./relay-gent status
+# Typecheck + build
+bun run build
+
+# Start the MCP server (default command)
+relay-gent
 ```
 
-The resulting `relay-gent` binary is fully self-contained — it runs on any matching OS/architecture **without Bun installed**. Move it anywhere on your PATH:
+## Usage
 
 ```bash
-mv relay-gent ~/.local/bin/
-relay-gent status
+# Start the MCP server over stdio transport
+relay-gent
+
+# Or explicitly:
+relay-gent mcp
 ```
 
-### From npm (when published)
+Once running, the MCP server exposes these tools and resources to the connected host (e.g., Claude Code):
 
-```bash
-npm install -g relay-gent
-# or
-bun install -g relay-gent
-```
+### Tools
 
-> **Note:** relay-gent has not yet been published to npm. Use the "From Source" or "Standalone Binary" methods above for now.
+| Tool | Description |
+|------|-------------|
+| `watch_file` | Start watching a file for changes and relay its contents |
+| `unwatch_file` | Stop watching a file |
+| `get_records` | Get all tracked records |
+| `get_status` | Get current watcher and record store status |
 
-### Verify Installation
+### Resources
 
-```bash
-relay-gent status
-```
+| Resource | Description |
+|----------|-------------|
+| `relay-gent://records` | All records tracked by relay-gent (JSON) |
+| `relay-gent://status` | Current watcher and record store status (JSON) |
 
-If successful, you'll see the status dashboard with your configured targets.
+### Notifications
 
-## Usage Examples
-
-```bash
-# Show status dashboard
-relay-gent status
-
-# One-shot parse and deliver
-relay-gent once ./data.ndjson --target my-app
-
-# Watch a file continuously
-relay-gent watch ./data.ndjson --target my-app
-
-# Run watcher in background (daemonize)
-relay-gent watch ./data.ndjson --target my-app --background
-
-# View target logs
-relay-gent log --target my-app
-
-# Stop a running watcher
-relay-gent stop --target my-app
-
-# Stop all watchers
-relay-gent stop --all
-
-# Clean stale state directories
-relay-gent clean --force
-```
+When a watched file changes, the server sends a `sendResourceUpdated` notification for the `relay-gent://records` resource, signaling the host to refresh.
 
 ## Supported Formats
 
@@ -103,24 +83,24 @@ relay-gent clean --force
 
 More parsers coming. See [Adding Parsers](docs/development/adding-parsers.md).
 
-## Supported Agents
-
-| Adapter | Description |
-|---------|-------------|
-| `opencode` | opencode server (default: `http://localhost:4096`) |
-| `claude` | Claude agent |
-| `codex` | Codex agent |
-| `raw-command` | Any shell command |
-
 ## Project Structure
 
 ```
 relay-gent/
   src/
     domain/         # Core business logic (no external deps)
-    application/    # Orchestration layer (CLI, watch loop)
-    infrastructure/ # External integrations
+      record/       # Record schemas + identity computation
+      parser/       # Parser interface + registry
+      errors/       # Custom error types
+    mcp/            # MCP server layer
+      server.ts     # Entry point, wires all components
+      tools.ts      # Tool handlers (watch_file, unwatch_file, get_records, get_status)
+      resources.ts  # Resource providers (relay-gent://records, relay-gent://status)
+      notifications.ts  # File change notifications to MCP host
+    watcher/        # Chokidar-based file watcher manager
+    state/          # Record store with atomic replace-on-change persistence
     parsers/        # Parser implementations + barrel registration
+    cli.ts          # Single mcp command (Commander, is default)
     index.ts        # Public API exports
   test/
     unit/           # Unit tests (mirror src/ structure)
