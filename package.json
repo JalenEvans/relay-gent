@@ -21,6 +21,7 @@
     "typescript": "^5.0.0"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.x",
     "chokidar": "^5.0.0",
     "commander": "^15.0.0",
     "toml": "^5.0.0",
